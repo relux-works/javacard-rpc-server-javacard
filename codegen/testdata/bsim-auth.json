@@ -1,0 +1,596 @@
+{
+  "Applet": {
+    "Name": "BSimAuth",
+    "Description": "Purpose-bound BSim authentication and provisioning applet contract",
+    "Version": "1.0.0",
+    "AID": "F00000002001",
+    "CLA": 182,
+    "StreamWorkspace": ""
+  },
+  "Methods": {
+    "buildProvisioningEnvelopeV3": {
+      "Name": "buildProvisioningEnvelopeV3",
+      "INS": 16,
+      "Description": "Validate one canonical signed BootstrapPacketV3 and return the canonical opaque provisioning result packet.",
+      "Request": {
+        "Fields": [
+          {
+            "Name": "signedBootstrap",
+            "Type": "stream",
+            "Length": null,
+            "FixedLength": 0,
+            "MaxLength": 1792,
+            "ChunkSize": 192,
+            "Location": "data"
+          }
+        ]
+      },
+      "Response": {
+        "Fields": [
+          {
+            "Name": "provisioningResult",
+            "Type": "stream",
+            "Length": null,
+            "FixedLength": 0,
+            "MaxLength": 1792,
+            "ChunkSize": 192,
+            "Location": ""
+          }
+        ]
+      }
+    },
+    "ensureKeyFootprintV1": {
+      "Name": "ensureKeyFootprintV1",
+      "INS": 86,
+      "Description": "Issuer-only: ensure the BSimID two-key footprint (Kprov 0x0010, AUTH 0x0011) exists and return both canonical SPKIs with their generations.",
+      "Request": null,
+      "Response": {
+        "Fields": [
+          {
+            "Name": "kprovSpki",
+            "Type": "bytes_fixed",
+            "Length": null,
+            "FixedLength": 91,
+            "MaxLength": 0,
+            "ChunkSize": 0,
+            "Location": ""
+          },
+          {
+            "Name": "kprovGeneration",
+            "Type": "u32",
+            "Length": null,
+            "FixedLength": 0,
+            "MaxLength": 0,
+            "ChunkSize": 0,
+            "Location": ""
+          },
+          {
+            "Name": "authSpki",
+            "Type": "bytes_fixed",
+            "Length": null,
+            "FixedLength": 91,
+            "MaxLength": 0,
+            "ChunkSize": 0,
+            "Location": ""
+          },
+          {
+            "Name": "authGeneration",
+            "Type": "u32",
+            "Length": null,
+            "FixedLength": 0,
+            "MaxLength": 0,
+            "ChunkSize": 0,
+            "Location": ""
+          }
+        ]
+      }
+    },
+    "getAuthAppletInfo": {
+      "Name": "getAuthAppletInfo",
+      "INS": 2,
+      "Description": "Return the fixed AuthAppletInfoV1 fields used by provisioning and authentication transcript hashes.",
+      "Request": null,
+      "Response": {
+        "Fields": [
+          {
+            "Name": "schemaVersion",
+            "Type": "u8",
+            "Length": null,
+            "FixedLength": 0,
+            "MaxLength": 0,
+            "ChunkSize": 0,
+            "Location": ""
+          },
+          {
+            "Name": "appletAid",
+            "Type": "bytes_fixed",
+            "Length": null,
+            "FixedLength": 6,
+            "MaxLength": 0,
+            "ChunkSize": 0,
+            "Location": ""
+          },
+          {
+            "Name": "versionMajor",
+            "Type": "u8",
+            "Length": null,
+            "FixedLength": 0,
+            "MaxLength": 0,
+            "ChunkSize": 0,
+            "Location": ""
+          },
+          {
+            "Name": "versionMinor",
+            "Type": "u8",
+            "Length": null,
+            "FixedLength": 0,
+            "MaxLength": 0,
+            "ChunkSize": 0,
+            "Location": ""
+          },
+          {
+            "Name": "versionPatch",
+            "Type": "u8",
+            "Length": null,
+            "FixedLength": 0,
+            "MaxLength": 0,
+            "ChunkSize": 0,
+            "Location": ""
+          },
+          {
+            "Name": "keyAlgorithm",
+            "Type": "u8",
+            "Length": null,
+            "FixedLength": 0,
+            "MaxLength": 0,
+            "ChunkSize": 0,
+            "Location": ""
+          },
+          {
+            "Name": "capabilities",
+            "Type": "u16",
+            "Length": null,
+            "FixedLength": 0,
+            "MaxLength": 0,
+            "ChunkSize": 0,
+            "Location": ""
+          }
+        ]
+      }
+    },
+    "getAuthenticationIdentity": {
+      "Name": "getAuthenticationIdentity",
+      "INS": 1,
+      "Description": "Create or read the Auth key and return canonical P-256 SPKI, its SHA-256 fingerprint, and the credential generation.",
+      "Request": null,
+      "Response": {
+        "Fields": [
+          {
+            "Name": "authenticationSpki",
+            "Type": "bytes_fixed",
+            "Length": null,
+            "FixedLength": 91,
+            "MaxLength": 0,
+            "ChunkSize": 0,
+            "Location": ""
+          },
+          {
+            "Name": "fingerprint",
+            "Type": "bytes_fixed",
+            "Length": null,
+            "FixedLength": 32,
+            "MaxLength": 0,
+            "ChunkSize": 0,
+            "Location": ""
+          },
+          {
+            "Name": "credentialGeneration",
+            "Type": "u32",
+            "Length": null,
+            "FixedLength": 0,
+            "MaxLength": 0,
+            "ChunkSize": 0,
+            "Location": ""
+          }
+        ]
+      }
+    },
+    "personalizeTrustAnchorV1": {
+      "Name": "personalizeTrustAnchorV1",
+      "INS": 80,
+      "Description": "Issuer-only: install the canonical 224-byte root anchor (rootEpoch || rootSpki[91] || rootSki[32] || rootSubjectHash[32] || cardIntermediateSki[32] || serverIntermediateSki[32] || allowedPurposes) through ANCHOR_SET_ACCEPT and return the accepted AnchorStateV1.",
+      "Request": {
+        "Fields": [
+          {
+            "Name": "canonicalAnchor",
+            "Type": "stream",
+            "Length": null,
+            "FixedLength": 0,
+            "MaxLength": 224,
+            "ChunkSize": 192,
+            "Location": "data"
+          }
+        ]
+      },
+      "Response": {
+        "Fields": [
+          {
+            "Name": "anchorState",
+            "Type": "bytes_fixed",
+            "Length": null,
+            "FixedLength": 38,
+            "MaxLength": 0,
+            "ChunkSize": 0,
+            "Location": ""
+          }
+        ]
+      }
+    },
+    "putCertAdmV1": {
+      "Name": "putCertAdmV1",
+      "INS": 136,
+      "Description": "Issuer-only: put one Cert_adm leaf (DER; SPKI == AUTH SPKI, EKU id-kp-bsim-admission, no id-bsim-iccid) for the personalized anchor at the AUTH address 0x0011 through CERT_PUT_BEGIN/CHUNK/COMMIT and return the certificate generation and leaf SHA-256.",
+      "Request": {
+        "Fields": [
+          {
+            "Name": "leafDer",
+            "Type": "stream",
+            "Length": null,
+            "FixedLength": 0,
+            "MaxLength": 2048,
+            "ChunkSize": 192,
+            "Location": "data"
+          }
+        ]
+      },
+      "Response": {
+        "Fields": [
+          {
+            "Name": "certificateGeneration",
+            "Type": "u32",
+            "Length": null,
+            "FixedLength": 0,
+            "MaxLength": 0,
+            "ChunkSize": 0,
+            "Location": ""
+          },
+          {
+            "Name": "leafSha256",
+            "Type": "bytes_fixed",
+            "Length": null,
+            "FixedLength": 32,
+            "MaxLength": 0,
+            "ChunkSize": 0,
+            "Location": ""
+          }
+        ]
+      }
+    },
+    "putCertSimV1": {
+      "Name": "putCertSimV1",
+      "INS": 88,
+      "Description": "Issuer-only: put one Cert_sim leaf (DER) for the personalized anchor at the Kprov address 0x0010 through CERT_PUT_BEGIN/CHUNK/COMMIT and return the certificate generation and leaf SHA-256.",
+      "Request": {
+        "Fields": [
+          {
+            "Name": "leafDer",
+            "Type": "stream",
+            "Length": null,
+            "FixedLength": 0,
+            "MaxLength": 2048,
+            "ChunkSize": 192,
+            "Location": "data"
+          }
+        ]
+      },
+      "Response": {
+        "Fields": [
+          {
+            "Name": "certificateGeneration",
+            "Type": "u32",
+            "Length": null,
+            "FixedLength": 0,
+            "MaxLength": 0,
+            "ChunkSize": 0,
+            "Location": ""
+          },
+          {
+            "Name": "leafSha256",
+            "Type": "bytes_fixed",
+            "Length": null,
+            "FixedLength": 32,
+            "MaxLength": 0,
+            "ChunkSize": 0,
+            "Location": ""
+          }
+        ]
+      }
+    },
+    "readKprovPublicationReceiptV1": {
+      "Name": "readKprovPublicationReceiptV1",
+      "INS": 87,
+      "Description": "Issuer-only: return the Core-signed KeyPublicationReceiptV1 for Kprov (0x0010), zero-padded to 176 bytes with its length prefixed.",
+      "Request": null,
+      "Response": {
+        "Fields": [
+          {
+            "Name": "receiptLength",
+            "Type": "u8",
+            "Length": null,
+            "FixedLength": 0,
+            "MaxLength": 0,
+            "ChunkSize": 0,
+            "Location": ""
+          },
+          {
+            "Name": "receipt",
+            "Type": "bytes_fixed",
+            "Length": null,
+            "FixedLength": 176,
+            "MaxLength": 0,
+            "ChunkSize": 0,
+            "Location": ""
+          }
+        ]
+      }
+    },
+    "signAdmissionV1": {
+      "Name": "signAdmissionV1",
+      "INS": 112,
+      "Description": "Validate and sign only a canonical AdmissionTranscriptV1 (object 0x09, purpose admission) under the AUTH key, then return the signature followed by AdmissionEvidenceV1 (Cert_adm leaf || card-issuance intermediate) read from the AUTH address 0x0011; 6A88 when no Cert_adm is stored.",
+      "Request": {
+        "Fields": [
+          {
+            "Name": "admissionTranscript",
+            "Type": "stream",
+            "Length": null,
+            "FixedLength": 0,
+            "MaxLength": 320,
+            "ChunkSize": 192,
+            "Location": "data"
+          }
+        ]
+      },
+      "Response": {
+        "Fields": [
+          {
+            "Name": "admissionProof",
+            "Type": "stream",
+            "Length": null,
+            "FixedLength": 0,
+            "MaxLength": 1408,
+            "ChunkSize": 192,
+            "Location": ""
+          }
+        ]
+      }
+    },
+    "signAuthKeyPossessionV1": {
+      "Name": "signAuthKeyPossessionV1",
+      "INS": 128,
+      "Description": "Issuer-only: validate one canonical AuthKeyPossessionV1 (object 0x0A, purpose admission-pop) whose authSpki equals PUBLIC_KEY_READ(0x0011) and sign it under the AUTH key; the proof of possession the issuer requires before issuing Cert_adm.",
+      "Request": {
+        "Fields": [
+          {
+            "Name": "possessionTranscript",
+            "Type": "stream",
+            "Length": null,
+            "FixedLength": 0,
+            "MaxLength": 224,
+            "ChunkSize": 192,
+            "Location": "data"
+          }
+        ]
+      },
+      "Response": {
+        "Fields": [
+          {
+            "Name": "signatureLength",
+            "Type": "u8",
+            "Length": null,
+            "FixedLength": 0,
+            "MaxLength": 0,
+            "ChunkSize": 0,
+            "Location": ""
+          },
+          {
+            "Name": "signatureDerPadded",
+            "Type": "bytes_fixed",
+            "Length": null,
+            "FixedLength": 72,
+            "MaxLength": 0,
+            "ChunkSize": 0,
+            "Location": ""
+          }
+        ]
+      }
+    },
+    "signAuthenticationChallengeV1": {
+      "Name": "signAuthenticationChallengeV1",
+      "INS": 32,
+      "Description": "Validate and sign only a canonical authentication-challenge transcript V1; never sign arbitrary bytes.",
+      "Request": {
+        "Fields": [
+          {
+            "Name": "challengeTranscript",
+            "Type": "stream",
+            "Length": null,
+            "FixedLength": 0,
+            "MaxLength": 2048,
+            "ChunkSize": 192,
+            "Location": "data"
+          }
+        ]
+      },
+      "Response": {
+        "Fields": [
+          {
+            "Name": "signatureLength",
+            "Type": "u8",
+            "Length": null,
+            "FixedLength": 0,
+            "MaxLength": 0,
+            "ChunkSize": 0,
+            "Location": ""
+          },
+          {
+            "Name": "signatureDerPadded",
+            "Type": "bytes_fixed",
+            "Length": null,
+            "FixedLength": 72,
+            "MaxLength": 0,
+            "ChunkSize": 0,
+            "Location": ""
+          }
+        ]
+      }
+    },
+    "signAuthenticationSessionV1": {
+      "Name": "signAuthenticationSessionV1",
+      "INS": 48,
+      "Description": "Validate and sign only a canonical authentication-session transcript V1; never sign arbitrary bytes.",
+      "Request": {
+        "Fields": [
+          {
+            "Name": "sessionTranscript",
+            "Type": "stream",
+            "Length": null,
+            "FixedLength": 0,
+            "MaxLength": 2048,
+            "ChunkSize": 192,
+            "Location": "data"
+          }
+        ]
+      },
+      "Response": {
+        "Fields": [
+          {
+            "Name": "signatureLength",
+            "Type": "u8",
+            "Length": null,
+            "FixedLength": 0,
+            "MaxLength": 0,
+            "ChunkSize": 0,
+            "Location": ""
+          },
+          {
+            "Name": "signatureDerPadded",
+            "Type": "bytes_fixed",
+            "Length": null,
+            "FixedLength": 72,
+            "MaxLength": 0,
+            "ChunkSize": 0,
+            "Location": ""
+          }
+        ]
+      }
+    },
+    "signMigrationIntentV1": {
+      "Name": "signMigrationIntentV1",
+      "INS": 64,
+      "Description": "Validate and sign only a canonical current-key migration-intent transcript V1; never sign arbitrary bytes.",
+      "Request": {
+        "Fields": [
+          {
+            "Name": "migrationIntent",
+            "Type": "stream",
+            "Length": null,
+            "FixedLength": 0,
+            "MaxLength": 2048,
+            "ChunkSize": 192,
+            "Location": "data"
+          }
+        ]
+      },
+      "Response": {
+        "Fields": [
+          {
+            "Name": "signatureLength",
+            "Type": "u8",
+            "Length": null,
+            "FixedLength": 0,
+            "MaxLength": 0,
+            "ChunkSize": 0,
+            "Location": ""
+          },
+          {
+            "Name": "signatureDerPadded",
+            "Type": "bytes_fixed",
+            "Length": null,
+            "FixedLength": 72,
+            "MaxLength": 0,
+            "ChunkSize": 0,
+            "Location": ""
+          }
+        ]
+      }
+    }
+  },
+  "StatusWords": {
+    "SW_ANCHOR_REPLAY": {
+      "Name": "SW_ANCHOR_REPLAY",
+      "Code": 27015,
+      "Description": "Relayed KeyVault REPLAY: same-epoch anchor conflict or lower-epoch rollback"
+    },
+    "SW_CREDENTIAL_NOT_FOUND": {
+      "Name": "SW_CREDENTIAL_NOT_FOUND",
+      "Code": 27272,
+      "Description": "Required compatible credential or evidence is unavailable"
+    },
+    "SW_DEPENDENCY_UNAVAILABLE": {
+      "Name": "SW_DEPENDENCY_UNAVAILABLE",
+      "Code": 27266,
+      "Description": "Required Crypto Primitives or KeyVault SIO is unavailable"
+    },
+    "SW_INVALID_DATA": {
+      "Name": "SW_INVALID_DATA",
+      "Code": 27264,
+      "Description": "Invalid canonical encoding, digest, point, or conflicting replay"
+    },
+    "SW_INVALID_LENGTH": {
+      "Name": "SW_INVALID_LENGTH",
+      "Code": 26368,
+      "Description": "Invalid APDU, field, packet, or canonical object length"
+    },
+    "SW_KEYVAULT_IDENTITY": {
+      "Name": "SW_KEYVAULT_IDENTITY",
+      "Code": 27016,
+      "Description": "Relayed KeyVault IDENTITY: leaf SPKI differs from the key at the put address"
+    },
+    "SW_KEYVAULT_INTERNAL": {
+      "Name": "SW_KEYVAULT_INTERNAL",
+      "Code": 28416,
+      "Description": "Relayed KeyVault INTERNAL_ERROR: corrupt row"
+    },
+    "SW_KEYVAULT_POLICY": {
+      "Name": "SW_KEYVAULT_POLICY",
+      "Code": 27014,
+      "Description": "Relayed KeyVault POLICY: key profile without certificate profile or usage"
+    },
+    "SW_KEYVAULT_QUOTA": {
+      "Name": "SW_KEYVAULT_QUOTA",
+      "Code": 27269,
+      "Description": "Relayed KeyVault QUOTA: anchor or certificate quota exhausted"
+    },
+    "SW_KEYVAULT_RESERVED": {
+      "Name": "SW_KEYVAULT_RESERVED",
+      "Code": 27265,
+      "Description": "Relayed KeyVault RESERVED: reserved anchor id or literal"
+    },
+    "SW_NO_MEMORY": {
+      "Name": "SW_NO_MEMORY",
+      "Code": 27268,
+      "Description": "Bounded transient workspace cannot be reserved"
+    },
+    "SW_SECURITY_STATUS_NOT_SATISFIED": {
+      "Name": "SW_SECURITY_STATUS_NOT_SATISFIED",
+      "Code": 27010,
+      "Description": "Required card-side authorization is absent"
+    },
+    "SW_WRONG_STATE": {
+      "Name": "SW_WRONG_STATE",
+      "Code": 27013,
+      "Description": "Operation or stream is not valid in the current state"
+    }
+  }
+}

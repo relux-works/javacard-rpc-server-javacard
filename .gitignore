@@ -22,3 +22,11 @@ Thumbs.db
 
 # Temp
 .temp/
+
+# Agent artifacts
+.task-board/
+LOGBOOK.md
+task-board.config.json
+AGENTS.md
+.research/
+.planning/

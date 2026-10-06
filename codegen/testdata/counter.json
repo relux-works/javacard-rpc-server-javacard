@@ -1,0 +1,273 @@
+{
+  "Applet": {
+    "Name": "Counter",
+    "Description": "Simple counter with increment, decrement, get, reset",
+    "Version": "1.0.0",
+    "AID": "F000000101",
+    "CLA": 176,
+    "StreamWorkspace": ""
+  },
+  "Methods": {
+    "decrement": {
+      "Name": "decrement",
+      "INS": 2,
+      "Description": "Decrement counter by amount",
+      "Request": {
+        "Fields": [
+          {
+            "Name": "amount",
+            "Type": "u8",
+            "Length": null,
+            "FixedLength": 0,
+            "MaxLength": 0,
+            "ChunkSize": 0,
+            "Location": "p1"
+          }
+        ]
+      },
+      "Response": {
+        "Fields": [
+          {
+            "Name": "value",
+            "Type": "u16",
+            "Length": null,
+            "FixedLength": 0,
+            "MaxLength": 0,
+            "ChunkSize": 0,
+            "Location": ""
+          }
+        ]
+      }
+    },
+    "get": {
+      "Name": "get",
+      "INS": 3,
+      "Description": "Get current counter value",
+      "Request": null,
+      "Response": {
+        "Fields": [
+          {
+            "Name": "value",
+            "Type": "u16",
+            "Length": null,
+            "FixedLength": 0,
+            "MaxLength": 0,
+            "ChunkSize": 0,
+            "Location": ""
+          }
+        ]
+      }
+    },
+    "getHash": {
+      "Name": "getHash",
+      "INS": 11,
+      "Description": "Get SHA-256 hash of stored data",
+      "Request": null,
+      "Response": {
+        "Fields": [
+          {
+            "Name": "hash",
+            "Type": "bytes_fixed",
+            "Length": null,
+            "FixedLength": 32,
+            "MaxLength": 0,
+            "ChunkSize": 0,
+            "Location": ""
+          }
+        ]
+      }
+    },
+    "getInfo": {
+      "Name": "getInfo",
+      "INS": 6,
+      "Description": "Get counter state: value, limit, version",
+      "Request": null,
+      "Response": {
+        "Fields": [
+          {
+            "Name": "value",
+            "Type": "u16",
+            "Length": null,
+            "FixedLength": 0,
+            "MaxLength": 0,
+            "ChunkSize": 0,
+            "Location": ""
+          },
+          {
+            "Name": "limit",
+            "Type": "u16",
+            "Length": null,
+            "FixedLength": 0,
+            "MaxLength": 0,
+            "ChunkSize": 0,
+            "Location": ""
+          },
+          {
+            "Name": "version",
+            "Type": "u8",
+            "Length": null,
+            "FixedLength": 0,
+            "MaxLength": 0,
+            "ChunkSize": 0,
+            "Location": ""
+          }
+        ]
+      }
+    },
+    "increment": {
+      "Name": "increment",
+      "INS": 1,
+      "Description": "Increment counter by amount",
+      "Request": {
+        "Fields": [
+          {
+            "Name": "amount",
+            "Type": "u8",
+            "Length": null,
+            "FixedLength": 0,
+            "MaxLength": 0,
+            "ChunkSize": 0,
+            "Location": "p1"
+          }
+        ]
+      },
+      "Response": {
+        "Fields": [
+          {
+            "Name": "value",
+            "Type": "u16",
+            "Length": null,
+            "FixedLength": 0,
+            "MaxLength": 0,
+            "ChunkSize": 0,
+            "Location": ""
+          }
+        ]
+      }
+    },
+    "load": {
+      "Name": "load",
+      "INS": 8,
+      "Description": "Load previously stored data blob",
+      "Request": null,
+      "Response": {
+        "Fields": [
+          {
+            "Name": "data",
+            "Type": "bytes",
+            "Length": null,
+            "FixedLength": 0,
+            "MaxLength": 0,
+            "ChunkSize": 0,
+            "Location": ""
+          }
+        ]
+      }
+    },
+    "reset": {
+      "Name": "reset",
+      "INS": 4,
+      "Description": "Reset counter to zero",
+      "Request": null,
+      "Response": null
+    },
+    "setCount": {
+      "Name": "setCount",
+      "INS": 9,
+      "Description": "Set current counter value",
+      "Request": {
+        "Fields": [
+          {
+            "Name": "value",
+            "Type": "u32",
+            "Length": null,
+            "FixedLength": 0,
+            "MaxLength": 0,
+            "ChunkSize": 0,
+            "Location": "data"
+          }
+        ]
+      },
+      "Response": null
+    },
+    "setEnabled": {
+      "Name": "setEnabled",
+      "INS": 10,
+      "Description": "Enable or disable counter",
+      "Request": {
+        "Fields": [
+          {
+            "Name": "enabled",
+            "Type": "bool",
+            "Length": null,
+            "FixedLength": 0,
+            "MaxLength": 0,
+            "ChunkSize": 0,
+            "Location": "p1"
+          }
+        ]
+      },
+      "Response": null
+    },
+    "setLimit": {
+      "Name": "setLimit",
+      "INS": 5,
+      "Description": "Set upper limit for counter",
+      "Request": {
+        "Fields": [
+          {
+            "Name": "limit",
+            "Type": "u16",
+            "Length": null,
+            "FixedLength": 0,
+            "MaxLength": 0,
+            "ChunkSize": 0,
+            "Location": "data"
+          }
+        ]
+      },
+      "Response": null
+    },
+    "store": {
+      "Name": "store",
+      "INS": 7,
+      "Description": "Store arbitrary data blob (up to 128 bytes)",
+      "Request": {
+        "Fields": [
+          {
+            "Name": "data",
+            "Type": "bytes",
+            "Length": null,
+            "FixedLength": 0,
+            "MaxLength": 0,
+            "ChunkSize": 0,
+            "Location": "data"
+          }
+        ]
+      },
+      "Response": null
+    }
+  },
+  "StatusWords": {
+    "SW_DATA_TOO_LONG": {
+      "Name": "SW_DATA_TOO_LONG",
+      "Code": 27264,
+      "Description": "Data exceeds max size"
+    },
+    "SW_NO_DATA": {
+      "Name": "SW_NO_DATA",
+      "Code": 27272,
+      "Description": "No data stored"
+    },
+    "SW_OVERFLOW": {
+      "Name": "SW_OVERFLOW",
+      "Code": 27014,
+      "Description": "Counter would exceed limit"
+    },
+    "SW_UNDERFLOW": {
+      "Name": "SW_UNDERFLOW",
+      "Code": 27013,
+      "Description": "Counter would go below zero"
+    }
+  }
+}

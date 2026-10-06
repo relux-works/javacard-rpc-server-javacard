@@ -1,0 +1,431 @@
+{
+  "Applet": {
+    "Name": "Counter",
+    "Description": "Counter example with richer auth-like metadata and signing methods",
+    "Version": "1.0.0",
+    "AID": "F000000101",
+    "CLA": 176,
+    "StreamWorkspace": ""
+  },
+  "Methods": {
+    "decrement": {
+      "Name": "decrement",
+      "INS": 2,
+      "Description": "Decrement counter by amount",
+      "Request": {
+        "Fields": [
+          {
+            "Name": "amount",
+            "Type": "u8",
+            "Length": null,
+            "FixedLength": 0,
+            "MaxLength": 0,
+            "ChunkSize": 0,
+            "Location": "p1"
+          }
+        ]
+      },
+      "Response": {
+        "Fields": [
+          {
+            "Name": "value",
+            "Type": "u16",
+            "Length": null,
+            "FixedLength": 0,
+            "MaxLength": 0,
+            "ChunkSize": 0,
+            "Location": ""
+          }
+        ]
+      }
+    },
+    "echoMessage": {
+      "Name": "echoMessage",
+      "INS": 14,
+      "Description": "Roundtrip an arbitrary UTF-8 string through the applet",
+      "Request": {
+        "Fields": [
+          {
+            "Name": "message",
+            "Type": "string",
+            "Length": null,
+            "FixedLength": 0,
+            "MaxLength": 0,
+            "ChunkSize": 0,
+            "Location": "data"
+          }
+        ]
+      },
+      "Response": {
+        "Fields": [
+          {
+            "Name": "message",
+            "Type": "string",
+            "Length": null,
+            "FixedLength": 0,
+            "MaxLength": 0,
+            "ChunkSize": 0,
+            "Location": ""
+          }
+        ]
+      }
+    },
+    "get": {
+      "Name": "get",
+      "INS": 3,
+      "Description": "Get current counter value",
+      "Request": null,
+      "Response": {
+        "Fields": [
+          {
+            "Name": "value",
+            "Type": "u16",
+            "Length": null,
+            "FixedLength": 0,
+            "MaxLength": 0,
+            "ChunkSize": 0,
+            "Location": ""
+          }
+        ]
+      }
+    },
+    "getAppletInfo": {
+      "Name": "getAppletInfo",
+      "INS": 11,
+      "Description": "Return mock typed applet metadata",
+      "Request": null,
+      "Response": {
+        "Fields": [
+          {
+            "Name": "schemaVersion",
+            "Type": "u8",
+            "Length": null,
+            "FixedLength": 0,
+            "MaxLength": 0,
+            "ChunkSize": 0,
+            "Location": ""
+          },
+          {
+            "Name": "appletAid",
+            "Type": "bytes_fixed",
+            "Length": null,
+            "FixedLength": 5,
+            "MaxLength": 0,
+            "ChunkSize": 0,
+            "Location": ""
+          },
+          {
+            "Name": "versionMajor",
+            "Type": "u8",
+            "Length": null,
+            "FixedLength": 0,
+            "MaxLength": 0,
+            "ChunkSize": 0,
+            "Location": ""
+          },
+          {
+            "Name": "versionMinor",
+            "Type": "u8",
+            "Length": null,
+            "FixedLength": 0,
+            "MaxLength": 0,
+            "ChunkSize": 0,
+            "Location": ""
+          },
+          {
+            "Name": "versionPatch",
+            "Type": "u8",
+            "Length": null,
+            "FixedLength": 0,
+            "MaxLength": 0,
+            "ChunkSize": 0,
+            "Location": ""
+          },
+          {
+            "Name": "keyAlgorithm",
+            "Type": "u8",
+            "Length": null,
+            "FixedLength": 0,
+            "MaxLength": 0,
+            "ChunkSize": 0,
+            "Location": ""
+          },
+          {
+            "Name": "capabilities",
+            "Type": "u16",
+            "Length": null,
+            "FixedLength": 0,
+            "MaxLength": 0,
+            "ChunkSize": 0,
+            "Location": ""
+          }
+        ]
+      }
+    },
+    "getDisplayName": {
+      "Name": "getDisplayName",
+      "INS": 13,
+      "Description": "Return a UTF-8 display name assembled by the applet",
+      "Request": null,
+      "Response": {
+        "Fields": [
+          {
+            "Name": "displayName",
+            "Type": "string",
+            "Length": null,
+            "FixedLength": 0,
+            "MaxLength": 0,
+            "ChunkSize": 0,
+            "Location": ""
+          }
+        ]
+      }
+    },
+    "getImsi": {
+      "Name": "getImsi",
+      "INS": 10,
+      "Description": "Return mock IMSI bytes as ASCII digits",
+      "Request": null,
+      "Response": {
+        "Fields": [
+          {
+            "Name": "imsi",
+            "Type": "ascii",
+            "Length": null,
+            "FixedLength": 0,
+            "MaxLength": 0,
+            "ChunkSize": 0,
+            "Location": ""
+          }
+        ]
+      }
+    },
+    "getInfo": {
+      "Name": "getInfo",
+      "INS": 6,
+      "Description": "Get counter state snapshot with flags",
+      "Request": null,
+      "Response": {
+        "Fields": [
+          {
+            "Name": "value",
+            "Type": "u16",
+            "Length": null,
+            "FixedLength": 0,
+            "MaxLength": 0,
+            "ChunkSize": 0,
+            "Location": ""
+          },
+          {
+            "Name": "limit",
+            "Type": "u16",
+            "Length": null,
+            "FixedLength": 0,
+            "MaxLength": 0,
+            "ChunkSize": 0,
+            "Location": ""
+          },
+          {
+            "Name": "version",
+            "Type": "u8",
+            "Length": null,
+            "FixedLength": 0,
+            "MaxLength": 0,
+            "ChunkSize": 0,
+            "Location": ""
+          },
+          {
+            "Name": "hasStoredData",
+            "Type": "bool",
+            "Length": null,
+            "FixedLength": 0,
+            "MaxLength": 0,
+            "ChunkSize": 0,
+            "Location": ""
+          },
+          {
+            "Name": "isAtLimit",
+            "Type": "bool",
+            "Length": null,
+            "FixedLength": 0,
+            "MaxLength": 0,
+            "ChunkSize": 0,
+            "Location": ""
+          }
+        ]
+      }
+    },
+    "getSpki": {
+      "Name": "getSpki",
+      "INS": 9,
+      "Description": "Return mock DER SPKI bytes similar to auth-style applets",
+      "Request": null,
+      "Response": {
+        "Fields": [
+          {
+            "Name": "spki",
+            "Type": "bytes_fixed",
+            "Length": null,
+            "FixedLength": 91,
+            "MaxLength": 0,
+            "ChunkSize": 0,
+            "Location": ""
+          }
+        ]
+      }
+    },
+    "increment": {
+      "Name": "increment",
+      "INS": 1,
+      "Description": "Increment counter by amount",
+      "Request": {
+        "Fields": [
+          {
+            "Name": "amount",
+            "Type": "u8",
+            "Length": null,
+            "FixedLength": 0,
+            "MaxLength": 0,
+            "ChunkSize": 0,
+            "Location": "p1"
+          }
+        ]
+      },
+      "Response": {
+        "Fields": [
+          {
+            "Name": "value",
+            "Type": "u16",
+            "Length": null,
+            "FixedLength": 0,
+            "MaxLength": 0,
+            "ChunkSize": 0,
+            "Location": ""
+          }
+        ]
+      }
+    },
+    "load": {
+      "Name": "load",
+      "INS": 8,
+      "Description": "Load previously stored data blob",
+      "Request": null,
+      "Response": {
+        "Fields": [
+          {
+            "Name": "data",
+            "Type": "bytes",
+            "Length": null,
+            "FixedLength": 0,
+            "MaxLength": 0,
+            "ChunkSize": 0,
+            "Location": ""
+          }
+        ]
+      }
+    },
+    "reset": {
+      "Name": "reset",
+      "INS": 4,
+      "Description": "Reset counter to zero",
+      "Request": null,
+      "Response": null
+    },
+    "setLimit": {
+      "Name": "setLimit",
+      "INS": 5,
+      "Description": "Set upper limit for counter",
+      "Request": {
+        "Fields": [
+          {
+            "Name": "limit",
+            "Type": "u16",
+            "Length": null,
+            "FixedLength": 0,
+            "MaxLength": 0,
+            "ChunkSize": 0,
+            "Location": "data"
+          }
+        ]
+      },
+      "Response": null
+    },
+    "signChallenge": {
+      "Name": "signChallenge",
+      "INS": 12,
+      "Description": "Return deterministic mock DER signature bytes for the provided challenge",
+      "Request": {
+        "Fields": [
+          {
+            "Name": "challenge",
+            "Type": "bytes",
+            "Length": null,
+            "FixedLength": 0,
+            "MaxLength": 0,
+            "ChunkSize": 0,
+            "Location": "data"
+          }
+        ]
+      },
+      "Response": {
+        "Fields": [
+          {
+            "Name": "signature",
+            "Type": "bytes",
+            "Length": null,
+            "FixedLength": 0,
+            "MaxLength": 0,
+            "ChunkSize": 0,
+            "Location": ""
+          }
+        ]
+      }
+    },
+    "store": {
+      "Name": "store",
+      "INS": 7,
+      "Description": "Store arbitrary data blob (up to 128 bytes)",
+      "Request": {
+        "Fields": [
+          {
+            "Name": "data",
+            "Type": "bytes",
+            "Length": null,
+            "FixedLength": 0,
+            "MaxLength": 0,
+            "ChunkSize": 0,
+            "Location": "data"
+          }
+        ]
+      },
+      "Response": null
+    }
+  },
+  "StatusWords": {
+    "SW_DATA_TOO_LONG": {
+      "Name": "SW_DATA_TOO_LONG",
+      "Code": 27264,
+      "Description": "Data exceeds max size"
+    },
+    "SW_EMPTY_CHALLENGE": {
+      "Name": "SW_EMPTY_CHALLENGE",
+      "Code": 26368,
+      "Description": "Challenge must not be empty"
+    },
+    "SW_NO_DATA": {
+      "Name": "SW_NO_DATA",
+      "Code": 27272,
+      "Description": "No data stored"
+    },
+    "SW_OVERFLOW": {
+      "Name": "SW_OVERFLOW",
+      "Code": 27014,
+      "Description": "Counter would exceed limit"
+    },
+    "SW_UNDERFLOW": {
+      "Name": "SW_UNDERFLOW",
+      "Code": 27013,
+      "Description": "Counter would go below zero"
+    }
+  }
+}

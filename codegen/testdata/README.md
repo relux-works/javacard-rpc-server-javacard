@@ -1,0 +1,33 @@
+# Java Card regression fixtures
+
+The JSON schemas are frozen normalized models exported using `ParseFile` and
+`Validate` from core commit `ef6e04bfae8dab0f8e1ac40c9bb10713dbf09250`.
+They cover the complete core parity input set: the example counter, test counter,
+test stream, and the pinned bsim-auth IDL at B6 commit
+`2d23abdafa1e0f68c6003ab56274b2ac38378ef9` (original TOML SHA-256
+`1be1ed52ac9a85a62d5c5e371a9e22d38f834282681528476ca071e7bfc2cb66`).
+No parser is part of this backend module.
+
+`parity-v0.4.5.json` pins hashes of every ordered package file obtained by running
+an independent CLI built from the signed published core `v0.4.5` tag. Its header
+records the release commit and binary SHA-256. Its 216 rows are the distinct
+JavaCard projection of the complete 720-cell core matrix: four inputs, three
+workspace policies, three lifecycle choices, three simulator options (default,
+explicit upstream, explicit Relux), and two namespaces (explicit and `--all`
+default). Duplicate Java selections in combined-target CLI cases collapse to
+these same rows. Tests compare the target's actual `Plugin.Generate` files.
+Empty simulator choices are expanded by the test consumer, as the facade does.
+
+CLI help, selector dispatch, parsing/IDL validation, invalid CLI simulator syntax,
+and Kotlin/Swift output are owned by the facade and outside target extraction.
+Unknown workspace and transient-memory options are also checked directly against
+the plugin, requiring no partial package. Namespace/schema refusals have valid
+controls. The full raw CLI matrix remains a core compatibility test.
+
+The Java golden files and JVM harnesses are unchanged donor fixtures. Original
+JavaCard regression test names are retained; their test-only generation helpers
+now unpack `Plugin.Generate` instead of calling renderer wrappers. The policy
+test drives backend policy refusal directly; it does not claim parser coverage.
+CAP and real simulator checks require explicit toolchain configuration and are
+separate from the JVM stand-in lane. No physical card or NVM endurance claim is
+made. Persistent cleanup remains exactly as v0.4.5; proportional wiping is deferred.

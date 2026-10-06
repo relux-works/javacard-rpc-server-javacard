@@ -1,0 +1,385 @@
+package io.jcrpc.counter.server;
+
+import javacard.framework.JCSystem;
+
+/**
+ * Generated skeleton for Counter applet.
+ * DO NOT EDIT — this file is produced by javacard-rpc codegen from counter.toml.
+ *
+ * CLA: 0xB0
+ * Methods:
+ *   INS 0x01 — increment(amount: u8) → value: u16
+ *   INS 0x02 — decrement(amount: u8) → value: u16
+ *   INS 0x03 — get() → value: u16
+ *   INS 0x04 — reset()
+ *   INS 0x05 — setLimit(limit: u16)
+ *   INS 0x06 — getInfo() → {value: u16, limit: u16, version: u8}
+ *   INS 0x07 — store(data: bytes)
+ *   INS 0x08 — load() → data: bytes
+ *   INS 0x09 — setCount(value: u32)
+ *   INS 0x0A — setEnabled(enabled: bool)
+ *   INS 0x0B — getHash() → hash: bytes_fixed
+ */
+public abstract class CounterSkeleton {
+
+    // INS codes from counter.toml
+    private static final byte INS_INCREMENT    = (byte) 0x01;
+    private static final byte INS_DECREMENT    = (byte) 0x02;
+    private static final byte INS_GET          = (byte) 0x03;
+    private static final byte INS_RESET        = (byte) 0x04;
+    private static final byte INS_SET_LIMIT    = (byte) 0x05;
+    private static final byte INS_GET_INFO     = (byte) 0x06;
+    private static final byte INS_STORE        = (byte) 0x07;
+    private static final byte INS_LOAD         = (byte) 0x08;
+    private static final byte INS_SET_COUNT    = (byte) 0x09;
+    private static final byte INS_SET_ENABLED  = (byte) 0x0A;
+    private static final byte INS_GET_HASH     = (byte) 0x0B;
+
+    // Status words from counter.toml
+    public static final short SW_UNDERFLOW     = (short) 0x6985;
+    public static final short SW_OVERFLOW      = (short) 0x6986;
+    public static final short SW_NO_DATA       = (short) 0x6A88;
+    public static final short SW_DATA_TOO_LONG = (short) 0x6A80;
+
+    public static final byte CLA_COUNTER = (byte) 0xB0;
+
+    private static final short SW_WRONG_LENGTH = (short) 0x6700;
+    private static final short SW_INS_NOT_SUPPORTED = (short) 0x6D00;
+    private final byte[] empty;
+    // The one StatusWordException this instance ever constructs. Every
+    // generated error path (dispatch default, pack*/read*/slice guards,
+    // fixed-length response checks) re-arms and rethrows it, so an
+    // unauthenticated caller looping unknown or malformed frames cannot
+    // grow the never-reclaimed Java Card heap (security audit S-01).
+    private final StatusWordException sharedFailure;
+
+    protected final CounterTransport transport;
+
+    protected CounterSkeleton(CounterTransport transport) {
+        this.transport = transport;
+        this.empty = new byte[0];
+        this.sharedFailure = new StatusWordException(SW_INS_NOT_SUPPORTED);
+    }
+
+    public final byte[] dispatch(byte ins, byte p1, byte p2, byte[] data) {
+        byte[] requestData = safeBytes(data);
+        switch (ins) {
+            case INS_INCREMENT:
+                return handleIncrement(p1, p2, requestData);
+            case INS_DECREMENT:
+                return handleDecrement(p1, p2, requestData);
+            case INS_GET:
+                return handleGet(p1, p2, requestData);
+            case INS_RESET:
+                onReset();
+                return empty;
+            case INS_SET_LIMIT:
+                return handleSetLimit(p1, p2, requestData);
+            case INS_GET_INFO:
+                return handleGetInfo(p1, p2, requestData);
+            case INS_STORE:
+                return handleStore(p1, p2, requestData);
+            case INS_LOAD:
+                return handleLoad(p1, p2, requestData);
+            case INS_SET_COUNT:
+                return handleSetCount(p1, p2, requestData);
+            case INS_SET_ENABLED:
+                return handleSetEnabled(p1, p2, requestData);
+            case INS_GET_HASH:
+                return handleGetHash(p1, p2, requestData);
+            default:
+                throw statusWordFailure(SW_INS_NOT_SUPPORTED);
+        }
+    }
+
+    protected final byte[] transmit(byte ins, byte p1, byte p2, byte[] data) {
+        return safeBytes(transport.transmit(ins, p1, p2, safeBytes(data)));
+    }
+
+    // --- Dispatch wiring (reads request fields, calls abstract method, returns encoded response) ---
+
+    private byte[] handleIncrement(byte p1, byte p2, byte[] requestData) {
+        // request: amount(u8) in P1
+        byte amount = p1;
+        short value = onIncrement(amount);
+        byte[] out = new byte[2];
+        packU16(out, 0, value);
+        return out;
+    }
+
+    private byte[] handleDecrement(byte p1, byte p2, byte[] requestData) {
+        // request: amount(u8) in P1
+        byte amount = p1;
+        short value = onDecrement(amount);
+        byte[] out = new byte[2];
+        packU16(out, 0, value);
+        return out;
+    }
+
+    private byte[] handleGet(byte p1, byte p2, byte[] requestData) {
+        short value = onGet();
+        byte[] out = new byte[2];
+        packU16(out, 0, value);
+        return out;
+    }
+
+    private byte[] handleSetLimit(byte p1, byte p2, byte[] requestData) {
+        // request: limit(u16) in data
+        if (requestData.length < 2) {
+            throw statusWordFailure(SW_WRONG_LENGTH);
+        }
+        short limit = readU16(requestData, 0);
+        onSetLimit(limit);
+        return empty;
+    }
+
+    private byte[] handleGetInfo(byte p1, byte p2, byte[] requestData) {
+        byte[] out = safeBytes(onGetInfo());
+        if (out.length != 5) {
+            throw statusWordFailure(SW_WRONG_LENGTH);
+        }
+        return out;
+    }
+
+    private byte[] handleStore(byte p1, byte p2, byte[] requestData) {
+        // request: data(bytes) in request data
+        byte[] data = slice(requestData, 0, requestData.length - 0);
+        onStore(data);
+        return empty;
+    }
+
+    private byte[] handleLoad(byte p1, byte p2, byte[] requestData) {
+        byte[] src = safeBytes(onLoad());
+        byte[] out = new byte[(short) src.length];
+        packBytes(out, 0, src, 0, src.length);
+        return out;
+    }
+
+    private byte[] handleSetCount(byte p1, byte p2, byte[] requestData) {
+        // request: value(u32) in data
+        if (requestData.length < 4) {
+            throw statusWordFailure(SW_WRONG_LENGTH);
+        }
+        int value = readU32(requestData, 0);
+        onSetCount(value);
+        return empty;
+    }
+
+    private byte[] handleSetEnabled(byte p1, byte p2, byte[] requestData) {
+        // request: enabled(bool) in P1
+        boolean enabled = readBool(p1);
+        onSetEnabled(enabled);
+        return empty;
+    }
+
+    private byte[] handleGetHash(byte p1, byte p2, byte[] requestData) {
+        byte[] src = safeBytes(onGetHash());
+        if (src.length != 32) {
+            throw statusWordFailure(SW_WRONG_LENGTH);
+        }
+        byte[] out = new byte[32];
+        packBytes(out, 0, src, 0, 32);
+        return out;
+    }
+
+    // --- Abstract methods — developer implements these ---
+
+    /** increment(amount: u8) → value: u16 */
+    protected abstract short onIncrement(byte amount);
+
+    /** decrement(amount: u8) → value: u16 */
+    protected abstract short onDecrement(byte amount);
+
+    /** get() → value: u16 */
+    protected abstract short onGet();
+
+    /** reset() */
+    protected abstract void onReset();
+
+    /** setLimit(limit: u16) */
+    protected abstract void onSetLimit(short limit);
+
+    /**
+     * getInfo() → {value: u16, limit: u16, version: u8}
+     * Return encoded response bytes in schema field order.
+     */
+    protected abstract byte[] onGetInfo();
+
+    /** store(data: bytes) */
+    protected abstract void onStore(byte[] data);
+
+    /**
+     * load() → data: bytes
+     * Return response bytes.
+     */
+    protected abstract byte[] onLoad();
+
+    /** setCount(value: u32) */
+    protected abstract void onSetCount(int value);
+
+    /** setEnabled(enabled: bool) */
+    protected abstract void onSetEnabled(boolean enabled);
+
+    /**
+     * getHash() → hash: bytes_fixed
+     * Return response bytes.
+     */
+    protected abstract byte[] onGetHash();
+
+    // No-message, numeric-only exception: java.lang.String is not safely
+    // convertible on real Java Card Classic runtimes (no StringBuilder,
+    // restricted String API), so this deliberately carries no message --
+    // callers should read getStatusWord() instead of getMessage().
+    // The reusable exception keeps its changing status in a CLEAR_ON_RESET
+    // transient array, so one preconstructed instance can carry every
+    // generated failure without writing persistent memory per frame.
+    public static final class StatusWordException extends RuntimeException {
+        private final short[] status;
+
+        public StatusWordException(short statusWord) {
+            super();
+            this.status = JCSystem.makeTransientShortArray(
+                    (short) 1, JCSystem.CLEAR_ON_RESET);
+            this.status[0] = statusWord;
+        }
+
+        public void setStatusWord(short statusWord) {
+            // This array is transient RAM; changing status never writes EEPROM.
+            this.status[0] = statusWord;
+        }
+
+        public short getStatusWord() {
+            return status[0];
+        }
+    }
+
+    /**
+     * Generated no-allocation failure path. Arms the one preconstructed
+     * StatusWordException with the given status word and returns it, so the
+     * caller writes {@code throw statusWordFailure(SW_X);}. Subclasses should
+     * use this instead of constructing a fresh StatusWordException on any
+     * per-command path: the Java Card heap is never reclaimed.
+     */
+    protected final StatusWordException statusWordFailure(short statusWord) {
+        sharedFailure.setStatusWord(statusWord);
+        return sharedFailure;
+    }
+
+    private byte[] safeBytes(byte[] data) {
+        return data == null ? empty : data;
+    }
+
+    // Offsets/lengths below are declared int (this file is generated with
+    // ints="true" support in the CAP build), but every actual array index is
+    // explicitly narrowed to short at the point of use -- the JCVM only
+    // accepts short/byte operands for array load/store, even when general
+    // int arithmetic is otherwise allowed. This file imports only JCSystem for
+    // transient status storage, so array copies still go through System.arraycopy,
+    // not Util.arrayCopyNonAtomic.
+    // The helpers are instance methods (not static) only so their guards can
+    // reach the preconstructed exception; a static initializer holding an
+    // object is not portable to Java Card Classic.
+
+    protected final int packU8(byte[] buf, int off, byte value) {
+        if (off < 0 || off >= buf.length) {
+            throw statusWordFailure(SW_WRONG_LENGTH);
+        }
+        buf[(short) off] = value;
+        return off + 1;
+    }
+
+    protected final int packBool(byte[] buf, int off, boolean value) {
+        return packU8(buf, off, (byte) (value ? 0x01 : 0x00));
+    }
+
+    protected final int packU16(byte[] buf, int off, short value) {
+        if (off < 0 || off+1 >= buf.length) {
+            throw statusWordFailure(SW_WRONG_LENGTH);
+        }
+        buf[(short) off] = (byte) ((value >>> 8) & 0xFF);
+        buf[(short) (off+1)] = (byte) (value & 0xFF);
+        return off + 2;
+    }
+
+    protected final int packU32(byte[] buf, int off, int value) {
+        if (off < 0 || off+3 >= buf.length) {
+            throw statusWordFailure(SW_WRONG_LENGTH);
+        }
+        buf[(short) off] = (byte) ((value >>> 24) & 0xFF);
+        buf[(short) (off+1)] = (byte) ((value >>> 16) & 0xFF);
+        buf[(short) (off+2)] = (byte) ((value >>> 8) & 0xFF);
+        buf[(short) (off+3)] = (byte) (value & 0xFF);
+        return off + 4;
+    }
+
+    protected final int packBytes(byte[] dst, int dstOff, byte[] src, int srcOff, int srcLen) {
+        if (srcLen < 0 || dstOff < 0 || srcOff < 0 || dstOff+srcLen > dst.length || srcOff+srcLen > src.length) {
+            throw statusWordFailure(SW_WRONG_LENGTH);
+        }
+        copyBytes(src, srcOff, dst, dstOff, srcLen);
+        return dstOff + srcLen;
+    }
+
+    // Manual byte-by-byte copy loop -- neither java.lang.System.arraycopy nor
+    // javacard.framework.Util.arrayCopyNonAtomic is available here: System's
+    // arraycopy is not part of the real Java Card Classic java.lang.System
+    // stub (rejected by the converter: "method arraycopy(...) not found in
+    // export file lang.exp"), and Util would require a javacard.framework
+    // import, which this file deliberately never has (kept usable as plain
+    // JVM code too). A short-indexed loop works identically on both.
+    private static void copyBytes(byte[] src, int srcOff, byte[] dst, int dstOff, int len) {
+        for (int i = 0; i < len; i++) {
+            dst[(short) (dstOff + i)] = src[(short) (srcOff + i)];
+        }
+    }
+
+    private boolean readBool(byte value) {
+        if (value == 0x00) {
+            return false;
+        }
+        if (value == 0x01) {
+            return true;
+        }
+        throw statusWordFailure(SW_WRONG_LENGTH);
+    }
+
+    private byte readU8(byte[] data, int off) {
+        if (off < 0 || off >= data.length) {
+            throw statusWordFailure(SW_WRONG_LENGTH);
+        }
+        return data[(short) off];
+    }
+
+    private boolean readBool(byte[] data, int off) {
+        return readBool(readU8(data, off));
+    }
+
+    private short readU16(byte[] data, int off) {
+        if (off < 0 || off+1 >= data.length) {
+            throw statusWordFailure(SW_WRONG_LENGTH);
+        }
+        return (short) (((data[(short) off] & 0xFF) << 8) | (data[(short) (off+1)] & 0xFF));
+    }
+
+    private int readU32(byte[] data, int off) {
+        if (off < 0 || off+3 >= data.length) {
+            throw statusWordFailure(SW_WRONG_LENGTH);
+        }
+        return ((data[(short) off] & 0xFF) << 24)
+            | ((data[(short) (off+1)] & 0xFF) << 16)
+            | ((data[(short) (off+2)] & 0xFF) << 8)
+            | (data[(short) (off+3)] & 0xFF);
+    }
+
+    private byte[] slice(byte[] data, int off, int len) {
+        if (off < 0 || len < 0 || off+len > data.length) {
+            throw statusWordFailure(SW_WRONG_LENGTH);
+        }
+        if (len == 0) {
+            return empty;
+        }
+        byte[] out = new byte[(short) len];
+        copyBytes(data, off, out, 0, len);
+        return out;
+    }
+}

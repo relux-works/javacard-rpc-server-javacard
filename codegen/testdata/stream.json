@@ -1,0 +1,82 @@
+{
+  "Applet": {
+    "Name": "StreamDemo",
+    "Description": "Bounded bidirectional stream fixture",
+    "Version": "1.0.0",
+    "AID": "F000000102",
+    "CLA": 176,
+    "StreamWorkspace": ""
+  },
+  "Methods": {
+    "getVersion": {
+      "Name": "getVersion",
+      "INS": 1,
+      "Description": "",
+      "Request": null,
+      "Response": {
+        "Fields": [
+          {
+            "Name": "version",
+            "Type": "u8",
+            "Length": null,
+            "FixedLength": 0,
+            "MaxLength": 0,
+            "ChunkSize": 0,
+            "Location": ""
+          }
+        ]
+      }
+    },
+    "issueReport": {
+      "Name": "issueReport",
+      "INS": 48,
+      "Description": "",
+      "Request": null,
+      "Response": {
+        "Fields": [
+          {
+            "Name": "report",
+            "Type": "stream",
+            "Length": null,
+            "FixedLength": 0,
+            "MaxLength": 64,
+            "ChunkSize": 32,
+            "Location": ""
+          }
+        ]
+      }
+    },
+    "processPacket": {
+      "Name": "processPacket",
+      "INS": 32,
+      "Description": "",
+      "Request": {
+        "Fields": [
+          {
+            "Name": "requestPacket",
+            "Type": "stream",
+            "Length": null,
+            "FixedLength": 0,
+            "MaxLength": 1792,
+            "ChunkSize": 192,
+            "Location": "data"
+          }
+        ]
+      },
+      "Response": {
+        "Fields": [
+          {
+            "Name": "resultPacket",
+            "Type": "stream",
+            "Length": null,
+            "FixedLength": 0,
+            "MaxLength": 1792,
+            "ChunkSize": 192,
+            "Location": ""
+          }
+        ]
+      }
+    }
+  },
+  "StatusWords": {}
+}
