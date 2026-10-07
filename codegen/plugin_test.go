@@ -166,7 +166,7 @@ func TestPluginPublishedDependencyBoundary(t *testing.T) {
 		if f[1] == "github.com/relux-works/javacard-rpc-server-javacard" {
 			continue
 		}
-		if len(f) != 3 || f[0] != "github.com/relux-works/javacard-rpc/pluginapi" || f[1] != "github.com/relux-works/javacard-rpc/pluginapi" || f[2] != "v0.1.0" {
+		if len(f) != 3 || f[0] != "github.com/relux-works/javacard-rpc/pluginapi" || f[1] != "github.com/relux-works/javacard-rpc/pluginapi" || f[2] != "v0.1.1" {
 			t.Fatalf("forbidden dependency: %q", line)
 		}
 		api = true

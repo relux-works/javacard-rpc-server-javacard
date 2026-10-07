@@ -37,13 +37,16 @@ func run(out, only string) error {
 	}
 	mutations := []mutation{
 		{"status-one-ins", "codegen/internal/render/gen_java.go", "sharedFailure.setStatusWord(statusWord);", "if (statusWord == SW_INS_NOT_SUPPORTED) return new StatusWordException(statusWord);\n        sharedFailure.setStatusWord(statusWord);", "TestGeneratedJavaSkeletonUnknownInsReusesOneException"},
-		{"wipe-prefix-nine", "codegen/internal/render/gen_java_stream.go", "wipe(workspace);", "if (workspace[0] != (byte)9) wipe(workspace);", "TestGeneratedReadCloseWipesNinePrefix"},
-		{"workspace-ram", "codegen/internal/render/gen_java.go", `s.Applet.StreamWorkspace != "persistent" {`, `s.Applet.StreamWorkspace != "persistent" && s.Applet.StreamWorkspace != "ram" {`, "TestStreamWorkspacePolicy"},
+		{"wipe-prefix-nine", "codegen/internal/render/gen_java_stream.go", "            {{if .StreamCleanupTracked}}wipeWritten();{{else}}wipe(workspace);{{end}}", "            {{if .StreamCleanupTracked}}wipeWritten();{{else}}if (workspace[0] != (byte)9) wipe(workspace);{{end}}", "TestGeneratedReadCloseWipesNinePrefix"},
+		{"workspace-ram", "codegen/internal/render/gen_java.go", `s.Applet.StreamWorkspace != "" && s.Applet.StreamWorkspace != "transient" && s.Applet.StreamWorkspace != "persistent" {`, `s.Applet.StreamWorkspace != "" && s.Applet.StreamWorkspace != "transient" && s.Applet.StreamWorkspace != "persistent" && s.Applet.StreamWorkspace != "ram" {`, "TestStreamWorkspacePolicy"},
 		{"memory-select", "codegen/internal/render/gen_java.go", `case "", StreamMemoryClearOnDeselect:`, `case "", "clear_on_select", StreamMemoryClearOnDeselect:`, "TestPluginRefusalsHaveNoEffects/unknown-memory"},
 		{"namespace-tab", "codegen/internal/render/gen_java.go", `if strings.TrimSpace(packageName) == "" {`, `if strings.TrimSpace(packageName) == "" && packageName != " \\t" {`, "TestPluginRefusalsHaveNoEffects/empty-namespace"},
 		{"package-byte-counter", "codegen/plugin.go", `for _, f := range []pluginapi.File{`, `if s.Applet.Name == "Counter" && o.Namespace == "io.parity.server" { files[0].Data[0] ^= 1 }; for _, f := range []pluginapi.File{`, "TestPluginReleasedV045Parity"},
 		{"runtime-cla-B1", "src/main/java/io/jcrpc/server/AppletBase.java", `if (buf[ISO7816.OFFSET_CLA] != cla) {`, `if (buf[ISO7816.OFFSET_CLA] != cla && buf[ISO7816.OFFSET_CLA] != (byte)0xB1) {`, "TestRootAppletBaseRealSimulator"},
 		{"dependency-toml", "codegen/plugin.go", `"fmt"`, `"fmt"; _ "github.com/BurntSushi/toml"`, "TestPluginPublishedDependencyBoundary"},
+		{"cleanup-unknown-one", "codegen/internal/render/gen_java.go", `case "":`, `case "", "unknown":`, "TestPersistentCleanupSelectorRefusals"},
+		{"cleanup-written-one", "codegen/internal/render/gen_java.go", `case pluginapi.StreamWorkspaceCleanupWholeReplyArea:`, `case pluginapi.StreamWorkspaceCleanupWholeReplyArea, pluginapi.StreamWorkspaceCleanupWrittenBytesOnly:`, "TestPersistentCleanupSelectorRefusals"},
+		{"cleanup-transient-one", "codegen/internal/render/gen_java.go", `if s.Applet.StreamWorkspace != "persistent" {`, `if s.Applet.StreamWorkspace != "persistent" && s.Applet.StreamWorkspace != "transient" {`, "TestPersistentCleanupSelectorRefusals"},
 	}
 	receipts := []receipt{}
 	for _, m := range mutations {
@@ -62,7 +65,7 @@ func run(out, only string) error {
 		if e != nil {
 			return e
 		}
-		if strings.Count(string(b), m.from) != 1 && m.name != "wipe-prefix-nine" {
+		if strings.Count(string(b), m.from) != 1 {
 			return fmt.Errorf("%s anchor count", m.name)
 		}
 		replacement := m.to
@@ -112,14 +115,17 @@ func run(out, only string) error {
 			return e
 		}
 		expected := map[string]string{
-			"status-one-ins":       "allocated a different exception",
-			"wipe-prefix-nine":     "workspace wipe: residual bytes",
-			"workspace-ram":        "invalid \"ram\": <nil>",
-			"memory-select":        "refusal: file count=7 error=<nil>",
-			"namespace-tab":        "refusal: file count=7 error=<nil>",
-			"package-byte-counter": "release byte/order drift at file 0: settings.gradle",
-			"runtime-cla-B1":       "AssertionError: response length",
-			"dependency-toml":      "forbidden dependency:",
+			"status-one-ins":        "allocated a different exception",
+			"wipe-prefix-nine":      "workspace wipe: residual bytes",
+			"workspace-ram":         "invalid \"ram\": <nil>",
+			"memory-select":         "refusal: file count=7 error=<nil>",
+			"namespace-tab":         "refusal: file count=7 error=<nil>",
+			"package-byte-counter":  "release byte/order drift at file 0: settings.gradle",
+			"runtime-cla-B1":        "AssertionError: response length",
+			"dependency-toml":       "forbidden dependency:",
+			"cleanup-unknown-one":   "invalid /unknown admitted",
+			"cleanup-written-one":   "invalid persistent/written-bytes-only admitted",
+			"cleanup-transient-one": "invalid transient/whole-reply-area admitted",
 		}[m.name]
 		killed := exit == 1 && expected != "" && strings.Contains(string(b), expected) && strings.Contains(string(b), "--- FAIL: "+strings.Split(m.test, "/")[0]) && !strings.Contains(string(b), "[build failed]") && !strings.Contains(string(b), "--- SKIP:")
 		bound := "killed at named behavioral assertion"

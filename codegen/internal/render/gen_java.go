@@ -7,6 +7,8 @@ import (
 	"strings"
 	"text/template"
 	"unicode"
+
+	"github.com/relux-works/javacard-rpc/pluginapi"
 )
 
 const javaTransportTemplate = `package {{.PackageName}};
@@ -378,6 +380,7 @@ type javaTemplateData struct {
 	// digest: "true" with StreamMemoryClearOnReset, "false" otherwise.
 	StreamDigestExternalAccess string
 	StreamWorkspacePersistent  bool
+	StreamCleanupTracked       bool
 	StreamCLAMatch             string
 }
 
@@ -472,6 +475,15 @@ func GenerateJavaSkeletonWithOptions(s *Schema, packageName string, options Java
 	if s.Applet.StreamWorkspace != "" && s.Applet.StreamWorkspace != "transient" && s.Applet.StreamWorkspace != "persistent" {
 		return nil, fmt.Errorf("unknown stream workspace %q: expected transient or persistent", s.Applet.StreamWorkspace)
 	}
+	switch s.Applet.StreamWorkspaceCleanup {
+	case "":
+	case pluginapi.StreamWorkspaceCleanupWholeReplyArea:
+		if s.Applet.StreamWorkspace != "persistent" {
+			return nil, fmt.Errorf("stream workspace cleanup requires persistent stream workspace")
+		}
+	default:
+		return nil, fmt.Errorf("unknown stream workspace cleanup %q", s.Applet.StreamWorkspaceCleanup)
+	}
 	if strings.TrimSpace(packageName) == "" {
 		return nil, fmt.Errorf("package name is empty")
 	}
@@ -500,6 +512,7 @@ func GenerateJavaSkeletonWithOptions(s *Schema, packageName string, options Java
 		StreamAPDUAdapterName:     toPascal(s.Applet.Name) + "StreamAPDUAdapter",
 		StreamTransientEvent:      streamEvent,
 		StreamWorkspacePersistent: s.Applet.StreamWorkspace == "persistent",
+		StreamCleanupTracked:      s.Applet.StreamWorkspaceCleanup != "",
 		StreamCLAMatch:            javaStreamCLAMatch(s.Applet.CLA),
 
 		StreamDigestExternalAccess: streamDigestExternalAccess,

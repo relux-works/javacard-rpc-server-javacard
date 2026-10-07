@@ -163,8 +163,10 @@ public final class {{.StreamRuntimeName}} implements {{.StreamEndpointName}} {
     private static final short IDX_NEXT_PACKET_INDEX          = (short) 15;
     private static final short IDX_RESULT_PACKET_COUNT        = (short) 16;
     /** Required length of the injected scalar array. */
-    public static final short SCALAR_COUNT = (short) 17;
-    /** Required length of the injected handler reference array. */
+{{if .StreamCleanupTracked}}    private static final short IDX_DIRTY_END = (short) 17;
+    public static final short SCALAR_COUNT = (short) 18;
+{{else}}    public static final short SCALAR_COUNT = (short) 17;
+{{end}}    /** Required length of the injected handler reference array. */
     public static final short HANDLER_SLOT_COUNT = (short) 1;
     private static final short IDX_HANDLER = (short) 0;
 
@@ -184,7 +186,7 @@ public final class {{.StreamRuntimeName}} implements {{.StreamEndpointName}} {
             Sha256 sha256) {
         this.workspace = workspace;
 {{if .StreamWorkspacePersistent}}        this.resetMarker = javacard.framework.JCSystem.makeTransientByteArray(
-                (short) 1, javacard.framework.JCSystem.{{.StreamTransientEvent}});
+                (short) 1, javacard.framework.JCSystem.{{if .StreamCleanupTracked}}CLEAR_ON_RESET{{else}}{{.StreamTransientEvent}}{{end}});
 {{end}}        this.digestScratch = digestScratch;
         this.scalars = scalars;
         this.handlerSlot = handlerSlot;
@@ -227,7 +229,9 @@ public final class {{.StreamRuntimeName}} implements {{.StreamEndpointName}} {
 {{if .StreamWorkspacePersistent}}            // Transient state is already empty after reset; clean retained NVM
             // before any command can expose or reuse it, including stale reads.
             if (resetMarker[0] == 0) {
-                clearAll();
+{{if .StreamCleanupTracked}}                // Reset lost the transient write frontier; retain the full reset wipe.
+                wipe(workspace);
+{{end}}                clearAll();
                 resetMarker[0] = (byte) 1;
             }
 {{end}}            validateRange(requestBuffer, requestOffset, requestLength);
@@ -288,7 +292,11 @@ public final class {{.StreamRuntimeName}} implements {{.StreamEndpointName}} {
 
     @Override
     public void abort(byte reason) {
-        clearAll();
+{{if .StreamCleanupTracked}}        if (resetMarker[0] == 0) {
+            wipe(workspace);
+            resetMarker[0] = (byte) 1;
+        }
+{{end}}        clearAll();
     }
 
     private boolean hasRequestStream() {
@@ -397,7 +405,8 @@ public final class {{.StreamRuntimeName}} implements {{.StreamEndpointName}} {
 
         scalars[IDX_LAST_CHUNK_OFFSET] = scalars[IDX_INPUT_LENGTH];
         scalars[IDX_LAST_CHUNK_LENGTH] = requestLength;
-        copy(request, requestOffset, workspace, scalars[IDX_INPUT_LENGTH], requestLength);
+{{if .StreamCleanupTracked}}        markWritten(scalars[IDX_INPUT_LENGTH], requestLength);
+{{end}}        copy(request, requestOffset, workspace, scalars[IDX_INPUT_LENGTH], requestLength);
         scalars[IDX_INPUT_LENGTH] = (short) ((scalars[IDX_INPUT_LENGTH] & 0xFFFF) + length);
         scalars[IDX_NEXT_PACKET_INDEX] = (short) (index + 1);
         return (short) 0;
@@ -463,7 +472,9 @@ public final class {{.StreamRuntimeName}} implements {{.StreamEndpointName}} {
             boolean preserveInputCloseReceipt) {
         short outputCapacity = hasResponseStream() ?
                 scalars[IDX_RESPONSE_MAX_LENGTH] : shortOutputCapacity();
-        short produced = ((Handler) handlerSlot[IDX_HANDLER]).execute(
+{{if .StreamCleanupTracked}}        // Mark before entering user code: scratch and exceptions are covered.
+        markWritten((short) 0, outputCapacity);
+{{end}}        short produced = ((Handler) handlerSlot[IDX_HANDLER]).execute(
                 (byte) scalars[IDX_ACTIVE_METHOD], input, inputOffset, inputSize,
                 workspace, (short) 0, outputCapacity);
         if (produced < 0 || produced > outputCapacity ||
@@ -542,7 +553,7 @@ public final class {{.StreamRuntimeName}} implements {{.StreamEndpointName}} {
             fail(SW_INVALID_DATA);
         }
         if (scalars[IDX_STATE] == STATE_READ_PENDING) {
-            wipe(workspace);
+            {{if .StreamCleanupTracked}}wipeWritten();{{else}}wipe(workspace);{{end}}
             scalars[IDX_STATE] = STATE_READ_CLOSED;
         }
         return (short) 0;
@@ -612,7 +623,22 @@ public final class {{.StreamRuntimeName}} implements {{.StreamEndpointName}} {
         return true;
     }
 
-    private void copy(
+{{if .StreamCleanupTracked}}    private void markWritten(short offset, short length) {
+        short end = (short) (offset + length);
+        if (length > 0 && end > scalars[IDX_DIRTY_END]) {
+            scalars[IDX_DIRTY_END] = end;
+        }
+    }
+
+    private void wipeWritten() {
+        short end = scalars[IDX_DIRTY_END];
+        for (short i = 0; i < end; i++) {
+            workspace[i] = (byte) 0;
+        }
+        scalars[IDX_DIRTY_END] = 0;
+    }
+
+{{end}}    private void copy(
             byte[] source,
             short sourceOffset,
             byte[] target,
@@ -639,7 +665,7 @@ public final class {{.StreamRuntimeName}} implements {{.StreamEndpointName}} {
      * so the result is bit-identical to a freshly cleared transient array.
 {{end}}     */
     private void clearAll() {
-        wipe(workspace);
+        {{if .StreamCleanupTracked}}wipeWritten();{{else}}wipe(workspace);{{end}}
         wipe(digestScratch);
         for (short i = 0; i < SCALAR_COUNT; i++) {
             scalars[i] = (short) 0;

@@ -1,6 +1,7 @@
 package codegen
 
 import (
+	"archive/zip"
 	"fmt"
 	"os"
 	"os/exec"
@@ -51,6 +52,10 @@ func TestGeneratedJavaStreamPackageConvertsToCAP(t *testing.T) {
 }
 
 func convertStreamCAP(t *testing.T, ant, antJavaCardJar, jckitDir, policy string, memory StreamMemory) {
+	convertCleanupCAP(t, ant, antJavaCardJar, jckitDir, policy, memory, "")
+}
+
+func convertCleanupCAP(t *testing.T, ant, antJavaCardJar, jckitDir, policy string, memory StreamMemory, cleanup string) int64 {
 	t.Helper()
 
 	schema, err := ParseFile(filepath.Join("testdata", "stream.toml"))
@@ -58,6 +63,7 @@ func convertStreamCAP(t *testing.T, ant, antJavaCardJar, jckitDir, policy string
 		t.Fatalf("ParseFile returned error: %v", err)
 	}
 	schema.Applet.StreamWorkspace = policy
+	schema.Applet.StreamWorkspaceCleanup = cleanup
 	result, err := GenerateJavaSkeletonWithOptions(schema, "io.jcrpc.streamdemo.server", JavaOptions{StreamMemory: memory})
 	if err != nil {
 		t.Fatalf("GenerateJavaSkeleton returned error: %v", err)
@@ -110,7 +116,48 @@ func convertStreamCAP(t *testing.T, ant, antJavaCardJar, jckitDir, policy string
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("CAP conversion failed: %v\n%s", err, output)
 	}
-	if info, err := os.Stat(filepath.Join(root, "streamdemo.cap")); err != nil || info.Size() == 0 {
+	info, err := os.Stat(filepath.Join(root, "streamdemo.cap"))
+	if err != nil || info.Size() == 0 {
 		t.Fatalf("CAP output missing or empty: %v", err)
+	}
+	capZIP, err := zip.OpenReader(filepath.Join(root, "streamdemo.cap"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer capZIP.Close()
+	var componentBytes, codeBytes uint64
+	for _, file := range capZIP.File {
+		if strings.HasSuffix(file.Name, ".cap") {
+			componentBytes += file.UncompressedSize64
+			if strings.HasSuffix(file.Name, "/Method.cap") {
+				codeBytes = file.UncompressedSize64
+			}
+		}
+	}
+	if componentBytes == 0 || codeBytes == 0 {
+		t.Fatal("CAP component inventory missing")
+	}
+	t.Logf("CAP components=%d B; Method.cap=%d B; ZIP=%d B", componentBytes, codeBytes, info.Size())
+	return info.Size()
+}
+
+// Default and whole reply must convert and verify with the real Classic SDK. This
+// proves converter acceptance, not card installation or physical RAM capacity.
+func TestPersistentCleanupCAP(t *testing.T) {
+	ant, err := exec.LookPath("ant")
+	if err != nil {
+		t.Fatal(err)
+	}
+	jar, kit := os.Getenv("JCRPC_ANT_JAVACARD_JAR"), os.Getenv("JCRPC_JCKIT_DIR")
+	if jar == "" || kit == "" {
+		t.Skip("set CAP toolchain variables")
+	}
+	for _, cleanup := range append([]string{""}, cleanupModes...) {
+		for _, memory := range []StreamMemory{StreamMemoryClearOnDeselect, StreamMemoryClearOnReset} {
+			t.Run(cleanup+"/"+string(memory), func(t *testing.T) {
+				size := convertCleanupCAP(t, ant, jar, kit, "persistent", memory, cleanup)
+				t.Logf("verified CAP ZIP=%d B", size)
+			})
+		}
 	}
 }

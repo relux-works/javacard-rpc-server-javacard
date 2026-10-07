@@ -42,7 +42,7 @@ from source; they do not require a Maven repository publication. See
 
 Import github.com/relux-works/javacard-rpc-server-javacard/codegen and call
 codegen.Plugin{}.Generate(schema, options). The only external Go dependency is
-released github.com/relux-works/javacard-rpc/pluginapi v0.1.0; there is no local
+released github.com/relux-works/javacard-rpc/pluginapi v0.1.1; there is no local
 replace or facade/parser/render dependency.
 
 The plugin consumes a validated pluginapi.Schema and explicit pluginapi.Options,
@@ -52,6 +52,11 @@ selection, simulator-coordinate validation and safe publication of returned
 files. Consumers must supply Namespace and SimulatorDependency (for example
 com.klinec:jcardsim:3.0.5.9); empty StreamMemory retains the released default.
 Unknown workspace or memory policies return an error without a partial package.
+Explicit `Applet.StreamWorkspaceCleanup` value `whole-reply-area` requires
+persistent workspace. `written-bytes-only` is rejected; handlers keep the
+released raw-array API. Empty cleanup preserves
+released bytes. See [cleanup contract and measured costs](PERSISTENT-WORKSPACE-COSTS.md)
+for migration, lifecycle behavior, measurements and their limits.
 Direct backend consumers use the package API; CLI integration is supplied by
 the facade version they select.
 
@@ -70,8 +75,8 @@ name, dependencies, Maven group/artifact names and Java package are preserved.
 | Go | go build ./...; go vet ./...: compile and lint backend | Go cache; console |
 | Gradle wrapper | ./gradlew build --no-daemon: build root runtime | build/libs/ |
 | Make | make test, make build, make lint: the narrow combined entry points | Same outputs as above |
-| Ant / ant-javacard / Java Card SDK | JCRPC_ANT_JAVACARD_JAR=/path/ant-javacard.jar JCRPC_JCKIT_DIR=/path/jc305u4_kit JAVA_HOME=/path/jdk11 PATH=/path/jdk11/bin:$PATH make test-cap | Four verified CAP variants in test temporary directories |
-| Relux jCardSim / JDK 17 | JCRPC_JCARDSIM_JAR=/path/jcardsim-3.0.5.9-relux.1.jar make test-simulator | Simulator JVM controls in test temporary directories |
+| Ant / ant-javacard / Java Card SDK | JCRPC_ANT_JAVACARD_JAR=/path/ant-javacard.jar JCRPC_JCKIT_DIR=/path/jc305u4_kit JAVA_HOME=/path/jdk11 PATH=/path/jdk11/bin:$PATH make test-cap | Default and explicit whole-reply cleanup, verified CAP inventories in test temporary directories |
+| Relux jCardSim / JDK 17 | JCRPC_JCARDSIM_JAR=/path/jcardsim-3.0.5.9-relux.1.jar make test-simulator | Real simulator lifecycle, allocation, cost and intended-violation controls in test temporary directories |
 | Go mutation runner | JCRPC_JCARDSIM_JAR=/path/jcardsim-3.0.5.9-relux.1.jar go run ./.scripts/check-mutants --out .temp/mutants-01 | Disposable candidate fixtures, per-mutant logs and receipts.json |
 | Git | git diff --check: whitespace validation | Console |
 
