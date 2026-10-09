@@ -30,7 +30,7 @@ func runExampleCost(t *testing.T, jar, mode string, plant bool) (string, error) 
 	fixture := streamDemoAppletFixture
 	fixture = strings.Replace(fixture, "private final Logic logic;", "static StreamDemoApplet installed;\n    private final byte[] noData=new byte[0];\n    private final Logic logic;", 1)
 	fixture = strings.Replace(fixture, "StreamDemoApplet() {", "StreamDemoApplet() {\n        installed=this;", 1)
-	fixture = strings.Replace(fixture, "ISOException.throwIt(ISO7816.SW_INS_NOT_SUPPORTED);", "byte[] response=logic.dispatch((byte)1,(byte)0,(byte)0,noData); apdu.setOutgoing(); apdu.setOutgoingLength((short)response.length); apdu.sendBytesLong(response,(short)0,(short)response.length);", 1)
+	fixture = strings.Replace(fixture, "ISOException.throwIt(ISO7816.SW_INS_NOT_SUPPORTED);", "byte[] response=apdu.getBuffer(); short produced=logic.dispatchTo((byte)1,(byte)0,(byte)0,null,(short)0,(short)0,response,(short)5,(short)(response.length-5)); apdu.setOutgoing(); apdu.setOutgoingLength(produced); apdu.sendBytesLong(response,(short)5,produced);", 1)
 	// Observe actual scalar handler stores separately from runtime request/copy
 	// and cleanup stores.
 	fixture = strings.ReplaceAll(fixture, "output[(short) (outputOffset + left)] =", "ExampleCostHarness.stores++;output[(short) (outputOffset + left)] =")

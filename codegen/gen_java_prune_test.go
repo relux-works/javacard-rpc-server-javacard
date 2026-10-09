@@ -57,7 +57,7 @@ func TestGeneratedJavaSkeletonPruningIsVisibleBetweenSchemas(t *testing.T) {
 
 	// counter.toml reads a u32 request field, a bool in p1 and a trailing bytes
 	// field; stream.toml reads none of them, so those helpers must be gone there.
-	for _, name := range []string{"readU32", "readBool", "readU8", "slice"} {
+	for _, name := range []string{"readU32", "readBool", "readU8"} {
 		if len(javaHelperBlocks(counter, name)) == 0 {
 			t.Errorf("counter.toml calls %q, so it must be declared", name)
 		}

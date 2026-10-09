@@ -36,6 +36,9 @@ func run(out, only string) error {
 		return e
 	}
 	mutations := []mutation{
+		{"ordinary-produced-name", "codegen/internal/render/gen_java.go", `for suffix := 1; n.used[name]; suffix++ {`, `for suffix := 1; n.used[name] && name != "produced"; suffix++ {`, "TestOrdinaryIdentifierSourceRegression/request-produced"},
+		{"ordinary-produced-name-javac", "codegen/internal/render/gen_java.go", `for suffix := 1; n.used[name]; suffix++ {`, `for suffix := 1; n.used[name] && name != "produced"; suffix++ {`, "TestReviewerOrdinaryIdentifierRegression/request-produced"},
+		{"ordinary-borrowed-offset-use", "codegen/internal/render/gen_java.go", `rh.ArgExprs = append(rh.ArgExprs, names.requestData, offsetName, lengthName)`, `if f.Name == "payload" { rh.ArgExprs = append(rh.ArgExprs, names.requestData, lengthName, lengthName) } else { rh.ArgExprs = append(rh.ArgExprs, names.requestData, offsetName, lengthName) }`, "TestReviewerOrdinaryIdentifierRegression/borrowed-suffix"},
 		{"status-one-ins", "codegen/internal/render/gen_java.go", "sharedFailure.setStatusWord(statusWord);", "if (statusWord == SW_INS_NOT_SUPPORTED) return new StatusWordException(statusWord);\n        sharedFailure.setStatusWord(statusWord);", "TestGeneratedJavaSkeletonUnknownInsReusesOneException"},
 		{"wipe-prefix-nine", "codegen/internal/render/gen_java_stream.go", "            {{if .StreamCleanupTracked}}wipeWritten();{{else}}wipe(workspace);{{end}}", "            {{if .StreamCleanupTracked}}wipeWritten();{{else}}if (workspace[0] != (byte)9) wipe(workspace);{{end}}", "TestGeneratedReadCloseWipesNinePrefix"},
 		{"workspace-ram", "codegen/internal/render/gen_java.go", `s.Applet.StreamWorkspace != "" && s.Applet.StreamWorkspace != "transient" && s.Applet.StreamWorkspace != "persistent" {`, `s.Applet.StreamWorkspace != "" && s.Applet.StreamWorkspace != "transient" && s.Applet.StreamWorkspace != "persistent" && s.Applet.StreamWorkspace != "ram" {`, "TestStreamWorkspacePolicy"},
@@ -115,20 +118,29 @@ func run(out, only string) error {
 			return e
 		}
 		expected := map[string]string{
-			"status-one-ins":        "allocated a different exception",
-			"wipe-prefix-nine":      "workspace wipe: residual bytes",
-			"workspace-ram":         "invalid \"ram\": <nil>",
-			"memory-select":         "refusal: file count=7 error=<nil>",
-			"namespace-tab":         "refusal: file count=7 error=<nil>",
-			"package-byte-counter":  "release byte/order drift at file 0: settings.gradle",
-			"runtime-cla-B1":        "AssertionError: response length",
-			"dependency-toml":       "forbidden dependency:",
-			"cleanup-unknown-one":   "invalid /unknown admitted",
-			"cleanup-written-one":   "invalid persistent/written-bytes-only admitted",
-			"cleanup-transient-one": "invalid transient/whole-reply-area admitted",
+			"ordinary-produced-name":       "generated namespace collision: produced",
+			"ordinary-produced-name-javac": "variable produced is already defined in method handleEcho",
+			"ordinary-borrowed-offset-use": "AssertionError: borrowed span window",
+			"status-one-ins":               "allocated a different exception",
+			"wipe-prefix-nine":             "workspace wipe: residual bytes",
+			"workspace-ram":                "invalid \"ram\": <nil>",
+			"memory-select":                "refusal: file count=7 error=<nil>",
+			"namespace-tab":                "refusal: file count=7 error=<nil>",
+			"package-byte-counter":         "release byte/order drift at file 0: settings.gradle",
+			"runtime-cla-B1":               "AssertionError: response length",
+			"dependency-toml":              "forbidden dependency:",
+			"cleanup-unknown-one":          "invalid /unknown admitted",
+			"cleanup-written-one":          "invalid persistent/written-bytes-only admitted",
+			"cleanup-transient-one":        "invalid transient/whole-reply-area admitted",
 		}[m.name]
 		killed := exit == 1 && expected != "" && strings.Contains(string(b), expected) && strings.Contains(string(b), "--- FAIL: "+strings.Split(m.test, "/")[0]) && !strings.Contains(string(b), "[build failed]") && !strings.Contains(string(b), "--- SKIP:")
 		bound := "killed at named behavioral assertion"
+		if m.name == "ordinary-produced-name" {
+			bound = "killed at named generated-source namespace assertion; Java compilation/behavior unrun"
+		}
+		if m.name == "ordinary-produced-name-javac" {
+			bound = "killed at intended duplicate-produced javac diagnostic; illegal Java cannot execute"
+		}
 		if !killed {
 			bound = "SURVIVOR: no named failing test; this property is unproven"
 		}

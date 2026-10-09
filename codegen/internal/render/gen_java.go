@@ -47,7 +47,7 @@ public abstract class {{.ClassName}} {
     private static final short SW_INS_NOT_SUPPORTED = (short) 0x6D00;
     private final byte[] empty;
     // The one StatusWordException this instance ever constructs. Every
-    // generated error path (dispatch default, pack*/read*/slice guards,
+    // generated error path (dispatch default, pack*/read* guards,
     // fixed-length response checks) re-arms and rethrows it, so an
     // unauthenticated caller looping unknown or malformed frames cannot
     // grow the never-reclaimed Java Card heap (security audit S-01).
@@ -61,8 +61,24 @@ public abstract class {{.ClassName}} {
         this.sharedFailure = new StatusWordException(SW_INS_NOT_SUPPORTED);
     }
 
-    public final byte[] dispatch(byte ins, byte p1, byte p2, byte[] data) {
-        byte[] requestData = safeBytes(data);
+    /**
+     * Write a whole ordinary reply into caller-owned storage; return its length.
+     * Null request storage is allowed only for the empty (0, 0) span.
+     * No APDU reference is retained. Typed inputs are decoded before any write.
+     * Byte-sequence inputs borrow request storage: consume overlapping input
+     * before writing output. Handlers must respect capacity and never retain
+     * request/output references. A rejected call yields no sendable length;
+     * output may already contain handler writes and is not rolled back.
+     */
+    public final short dispatchTo(byte ins, byte p1, byte p2,
+            byte[] requestBuffer, short requestOffset, short requestLength,
+            byte[] output, short outputOffset, short outputCapacity) {
+        if (requestBuffer == null && (requestOffset != 0 || requestLength != 0)) {
+            throw statusWordFailure(SW_WRONG_LENGTH);
+        }
+        byte[] requestData = safeBytes(requestBuffer);
+        checkWindow(requestData, requestOffset, requestLength);
+        checkWindow(output, outputOffset, outputCapacity);
         switch (ins) {
 {{.DispatchCasesBlock}}            default:
                 throw statusWordFailure(SW_INS_NOT_SUPPORTED);
@@ -121,19 +137,26 @@ public abstract class {{.ClassName}} {
         return data == null ? empty : data;
     }
 
+    // Subtraction after offset validation avoids overflow in offset + length.
+    private void checkWindow(byte[] buffer, short offset, short length) {
+        if (buffer == null || offset < 0 || length < 0 ||
+                offset > buffer.length || length > buffer.length - offset) {
+            throw statusWordFailure(SW_WRONG_LENGTH);
+        }
+    }
+
     // Offsets/lengths below are declared int (this file is generated with
     // ints="true" support in the CAP build), but every actual array index is
     // explicitly narrowed to short at the point of use -- the JCVM only
     // accepts short/byte operands for array load/store, even when general
     // int arithmetic is otherwise allowed. This file imports only JCSystem for
-    // transient status storage, so array copies still go through System.arraycopy,
-    // not Util.arrayCopyNonAtomic.
+    // transient status storage; copies use the short-indexed loop below.
     // The helpers are instance methods (not static) only so their guards can
     // reach the preconstructed exception; a static initializer holding an
     // object is not portable to Java Card Classic.
 
     protected final int packU8(byte[] buf, int off, byte value) {
-        if (off < 0 || off >= buf.length) {
+        if (buf == null || off < 0 || off >= buf.length) {
             throw statusWordFailure(SW_WRONG_LENGTH);
         }
         buf[(short) off] = value;
@@ -145,7 +168,7 @@ public abstract class {{.ClassName}} {
     }
 
     protected final int packU16(byte[] buf, int off, short value) {
-        if (off < 0 || off+1 >= buf.length) {
+        if (buf == null || off < 0 || off > buf.length || 2 > buf.length - off) {
             throw statusWordFailure(SW_WRONG_LENGTH);
         }
         buf[(short) off] = (byte) ((value >>> 8) & 0xFF);
@@ -154,7 +177,7 @@ public abstract class {{.ClassName}} {
     }
 
     protected final int packU32(byte[] buf, int off, int value) {
-        if (off < 0 || off+3 >= buf.length) {
+        if (buf == null || off < 0 || off > buf.length || 4 > buf.length - off) {
             throw statusWordFailure(SW_WRONG_LENGTH);
         }
         buf[(short) off] = (byte) ((value >>> 24) & 0xFF);
@@ -165,7 +188,9 @@ public abstract class {{.ClassName}} {
     }
 
     protected final int packBytes(byte[] dst, int dstOff, byte[] src, int srcOff, int srcLen) {
-        if (srcLen < 0 || dstOff < 0 || srcOff < 0 || dstOff+srcLen > dst.length || srcOff+srcLen > src.length) {
+        if (dst == null || src == null || srcLen < 0 || dstOff < 0 || srcOff < 0 ||
+                dstOff > dst.length || srcOff > src.length ||
+                srcLen > dst.length - dstOff || srcLen > src.length - srcOff) {
             throw statusWordFailure(SW_WRONG_LENGTH);
         }
         copyBytes(src, srcOff, dst, dstOff, srcLen);
@@ -180,6 +205,13 @@ public abstract class {{.ClassName}} {
     // import, which this file deliberately never has (kept usable as plain
     // JVM code too). A short-indexed loop works identically on both.
     private static void copyBytes(byte[] src, int srcOff, byte[] dst, int dstOff, int len) {
+        // memmove semantics for callers echoing a borrowed overlapping span.
+        if (src == dst && dstOff > srcOff && dstOff - srcOff < len) {
+            for (int i = len - 1; i >= 0; i--) {
+                dst[(short) (dstOff + i)] = src[(short) (srcOff + i)];
+            }
+            return;
+        }
         for (int i = 0; i < len; i++) {
             dst[(short) (dstOff + i)] = src[(short) (srcOff + i)];
         }
@@ -223,17 +255,6 @@ public abstract class {{.ClassName}} {
             | (data[(short) (off+3)] & 0xFF);
     }
 
-    private byte[] slice(byte[] data, int off, int len) {
-        if (off < 0 || len < 0 || off+len > data.length) {
-            throw statusWordFailure(SW_WRONG_LENGTH);
-        }
-        if (len == 0) {
-            return empty;
-        }
-        byte[] out = new byte[(short) len];
-        copyBytes(data, off, out, 0, len);
-        return out;
-    }
 }
 `
 
@@ -427,6 +448,7 @@ type javaMethodRender struct {
 	Signature                string
 	HasHandler               bool
 	HandlerLines             []string
+	HandlerParams            []string
 	AbstractReturn           string
 	AbstractParams           []string
 	ResponseKind             responseKind
@@ -624,145 +646,108 @@ func renderMethod(name string, m *Method) (javaMethodRender, error) {
 		return mr, nil
 	}
 
-	request, err := buildRequestHandling(m.Request)
+	names := newOrdinaryJavaNames(m.Request)
+	request, err := buildRequestHandling(m.Request, names)
 	if err != nil {
 		return javaMethodRender{}, err
 	}
 
-	responseFields := responseFields(m.Response)
-	switch {
-	case len(responseFields) == 0:
-		mr.AbstractReturn = "void"
-		mr.AbstractParams = request.ParamDecls
-		mr.ResponseKind = responseKindNone
-		if len(request.Lines) == 0 {
-			mr.HasHandler = false
-			return mr, nil
-		}
-		mr.HasHandler = true
-		mr.HandlerLines = appendHandlerBody(
-			request,
-			fmt.Sprintf("%s(%s);", mr.AbstractName, strings.Join(request.ArgExprs, ", ")),
-			"return empty;",
-		)
-		return mr, nil
-	case len(responseFields) == 1 && responseFields[0].Type == FieldTypeU8:
-		mr.AbstractReturn = "byte"
-		mr.AbstractParams = request.ParamDecls
-		mr.HasHandler = true
-		resultName := responseFields[0].Name
-		call := fmt.Sprintf("%s(%s)", mr.AbstractName, strings.Join(request.ArgExprs, ", "))
-		mr.HandlerLines = appendHandlerBody(
-			request,
-			fmt.Sprintf("byte %s = %s;", resultName, call),
-			"byte[] out = new byte[1];",
-			fmt.Sprintf("packU8(out, 0, %s);", resultName),
-			"return out;",
-		)
-		mr.ResponseKind = responseKindPrimitive
-		return mr, nil
-	case len(responseFields) == 1 && responseFields[0].Type == FieldTypeBool:
-		mr.AbstractReturn = "boolean"
-		mr.AbstractParams = request.ParamDecls
-		mr.HasHandler = true
-		resultName := responseFields[0].Name
-		call := fmt.Sprintf("%s(%s)", mr.AbstractName, strings.Join(request.ArgExprs, ", "))
-		mr.HandlerLines = appendHandlerBody(
-			request,
-			fmt.Sprintf("boolean %s = %s;", resultName, call),
-			"byte[] out = new byte[1];",
-			fmt.Sprintf("packBool(out, 0, %s);", resultName),
-			"return out;",
-		)
-		mr.ResponseKind = responseKindPrimitive
-		return mr, nil
-	case len(responseFields) == 1 && responseFields[0].Type == FieldTypeU16:
-		mr.AbstractReturn = "short"
-		mr.AbstractParams = request.ParamDecls
-		mr.HasHandler = true
-		resultName := responseFields[0].Name
-		call := fmt.Sprintf("%s(%s)", mr.AbstractName, strings.Join(request.ArgExprs, ", "))
-		mr.HandlerLines = appendHandlerBody(
-			request,
-			fmt.Sprintf("short %s = %s;", resultName, call),
-			"byte[] out = new byte[2];",
-			fmt.Sprintf("packU16(out, 0, %s);", resultName),
-			"return out;",
-		)
-		mr.ResponseKind = responseKindPrimitive
-		return mr, nil
-	case len(responseFields) == 1 && responseFields[0].Type == FieldTypeU32:
-		mr.AbstractReturn = "int"
-		mr.AbstractParams = request.ParamDecls
-		mr.HasHandler = true
-		resultName := responseFields[0].Name
-		call := fmt.Sprintf("%s(%s)", mr.AbstractName, strings.Join(request.ArgExprs, ", "))
-		mr.HandlerLines = appendHandlerBody(
-			request,
-			fmt.Sprintf("int %s = %s;", resultName, call),
-			"byte[] out = new byte[4];",
-			fmt.Sprintf("packU32(out, 0, %s);", resultName),
-			"return out;",
-		)
-		mr.ResponseKind = responseKindPrimitive
-		return mr, nil
-	case len(responseFields) == 1 && isByteSequenceField(responseFields[0]):
-		mr.AbstractReturn = "byte[]"
-		mr.AbstractParams = request.ParamDecls
-		mr.HasHandler = true
-		call := fmt.Sprintf("%s(%s)", mr.AbstractName, strings.Join(request.ArgExprs, ", "))
-		lines := []string{
-			fmt.Sprintf("byte[] src = safeBytes(%s);", call),
-		}
-		if fixedLen, ok := byteSequenceFixedLength(responseFields[0]); ok {
-			lines = append(lines,
-				fmt.Sprintf("if (src.length != %d) {", fixedLen),
-				"    throw statusWordFailure(SW_WRONG_LENGTH);",
-				"}",
-				fmt.Sprintf("byte[] out = new byte[%d];", fixedLen),
-				fmt.Sprintf("packBytes(out, 0, src, 0, %d);", fixedLen),
-				"return out;",
-			)
-		} else {
-			lines = append(lines,
-				"byte[] out = new byte[(short) src.length];",
-				"packBytes(out, 0, src, 0, src.length);",
-				"return out;",
-			)
-		}
-		mr.HandlerLines = appendHandlerBody(request, lines...)
-		mr.ResponseKind = responseKindBytes
-		return mr, nil
-	default:
-		mr.AbstractReturn = "byte[]"
-		mr.AbstractParams = request.ParamDecls
-		mr.HasHandler = true
-		call := fmt.Sprintf("%s(%s)", mr.AbstractName, strings.Join(request.ArgExprs, ", "))
-		lines := []string{fmt.Sprintf("byte[] out = safeBytes(%s);", call)}
-		if fixedLength, fixed := fixedMessageLength(responseFields); fixed {
-			lines = append(lines,
-				fmt.Sprintf("if (out.length != %d) {", fixedLength),
-				"    throw statusWordFailure(SW_WRONG_LENGTH);",
-				"}",
-			)
-		}
-		lines = append(lines, "return out;")
-		mr.HandlerLines = appendHandlerBody(request, lines...)
-		mr.ResponseKind = responseKindPacked
-		return mr, nil
+	fields := responseFields(m.Response)
+	mr.AbstractParams = request.ParamDecls
+	mr.HasHandler = true
+	width, fixed := fixedMessageLength(fields)
+	lines := []string{}
+	if fixed {
+		lines = append(lines, fmt.Sprintf("if (%s < %d) {", names.outputCapacity, width), "    throw statusWordFailure(SW_WRONG_LENGTH);", "}")
 	}
+	args := strings.Join(request.ArgExprs, ", ")
+	call := fmt.Sprintf("%s(%s)", mr.AbstractName, args)
+	switch {
+	case len(fields) == 0:
+		mr.AbstractReturn = "void"
+		mr.ResponseKind = responseKindNone
+		lines = append(lines, call+";", "return (short) 0;")
+	case len(fields) == 1 && (fields[0].Type == FieldTypeU8 || fields[0].Type == FieldTypeBool || fields[0].Type == FieldTypeU16 || fields[0].Type == FieldTypeU32):
+		mr.ResponseKind = responseKindPrimitive
+		codec := ""
+		switch fields[0].Type {
+		case FieldTypeU8:
+			mr.AbstractReturn, codec = "byte", "packU8"
+		case FieldTypeBool:
+			mr.AbstractReturn, codec = "boolean", "packBool"
+		case FieldTypeU16:
+			mr.AbstractReturn, codec = "short", "packU16"
+		case FieldTypeU32:
+			mr.AbstractReturn, codec = "int", "packU32"
+		}
+		lines = append(lines, fmt.Sprintf("%s %s = %s;", mr.AbstractReturn, names.result, call), fmt.Sprintf("%s(%s, %s, %s);", codec, names.output, names.outputOffset, names.result), fmt.Sprintf("return (short) %d;", width))
+	default:
+		mr.AbstractReturn = "short"
+		mr.ResponseKind = responseKindPacked
+		if len(fields) == 1 && isByteSequenceField(fields[0]) {
+			mr.ResponseKind = responseKindBytes
+		}
+		mr.AbstractParams = append(mr.AbstractParams, "byte[] "+names.output, "short "+names.outputOffset, "short "+names.outputCapacity)
+		if args != "" {
+			args += ", "
+		}
+		capacity := names.outputCapacity
+		if fixed {
+			capacity = fmt.Sprintf("(short) %d", width)
+		}
+		lines = append(lines, fmt.Sprintf("short %s = %s(%s%s, %s, %s);", names.produced, mr.AbstractName, args, names.output, names.outputOffset, capacity), fmt.Sprintf("if (%s < 0 || %s > %s) {", names.produced, names.produced, names.outputCapacity), "    throw statusWordFailure(SW_WRONG_LENGTH);", "}")
+		if fixed {
+			lines = append(lines, fmt.Sprintf("if (%s != %d) {", names.produced, width), "    throw statusWordFailure(SW_WRONG_LENGTH);", "}")
+		}
+		lines = append(lines, "return "+names.produced+";")
+	}
+	mr.HandlerLines = appendHandlerBody(request, lines...)
+	mr.HandlerParams = []string{"byte " + names.p1, "byte " + names.p2, "byte[] " + names.requestData, "short " + names.requestOffset, "short " + names.requestLength, "byte[] " + names.output, "short " + names.outputOffset, "short " + names.outputCapacity}
+	return mr, nil
 }
 
-func buildRequestHandling(msg *Message) (requestHandling, error) {
+// Reserve the COMPLETE user namespace before choosing any generated name. A
+// later field can collide with an earlier field's Offset/Length companion, and
+// suffixes themselves are valid IDL names. Each allocation is reserved in turn.
+type ordinaryJavaNames struct {
+	used                                                   map[string]bool
+	p1, p2, requestData, requestOffset, requestLength      string
+	output, outputOffset, outputCapacity, result, produced string
+}
+
+func newOrdinaryJavaNames(msg *Message) *ordinaryJavaNames {
+	n := &ordinaryJavaNames{used: map[string]bool{}}
+	if msg != nil {
+		for _, f := range msg.Fields {
+			n.used[f.Name] = true
+		}
+	}
+	n.p1, n.p2 = n.take("p1"), n.take("p2")
+	n.requestData, n.requestOffset, n.requestLength = n.take("requestData"), n.take("requestOffset"), n.take("requestLength")
+	n.output, n.outputOffset, n.outputCapacity = n.take("output"), n.take("outputOffset"), n.take("outputCapacity")
+	n.result, n.produced = n.take("result"), n.take("produced")
+	return n
+}
+
+func (n *ordinaryJavaNames) take(base string) string {
+	name := base
+	for suffix := 1; n.used[name]; suffix++ {
+		name = fmt.Sprintf("%s_%d", base, suffix)
+	}
+	n.used[name] = true
+	return name
+}
+
+func buildRequestHandling(msg *Message, names *ordinaryJavaNames) (requestHandling, error) {
 	rh := requestHandling{}
 	if msg == nil || len(msg.Fields) == 0 {
+		rh.Lines = []string{fmt.Sprintf("if (%s != 0) {", names.requestLength), "    throw statusWordFailure(SW_WRONG_LENGTH);", "}"}
 		return rh, nil
 	}
 
 	fields := msg.Fields
 	rh.Comment = requestComment(fields)
 
-	hasData := false
 	variableFieldIndex := -1
 	fixedDataLen := 0
 
@@ -773,7 +758,6 @@ func buildRequestHandling(msg *Message) (requestHandling, error) {
 				return requestHandling{}, fmt.Errorf("%s field must be u8 or bool", f.Location)
 			}
 		case ParameterLocationData, ParameterLocationNone:
-			hasData = true
 			switch f.Type {
 			case FieldTypeU8, FieldTypeBool:
 				fixedDataLen++
@@ -814,15 +798,11 @@ func buildRequestHandling(msg *Message) (requestHandling, error) {
 		}
 	}
 
-	if hasData {
-		if fixedDataLen > 0 {
-			rh.Lines = append(rh.Lines,
-				fmt.Sprintf("if (requestData.length < %d) {", fixedDataLen),
-				"    throw statusWordFailure(SW_WRONG_LENGTH);",
-				"}",
-			)
-		}
+	comparison := "!="
+	if variableFieldIndex != -1 {
+		comparison = "<"
 	}
+	rh.Lines = append(rh.Lines, fmt.Sprintf("if (%s %s %d) {", names.requestLength, comparison, fixedDataLen), "    throw statusWordFailure(SW_WRONG_LENGTH);", "}")
 
 	dataOffset := 0
 	for _, f := range fields {
@@ -832,11 +812,11 @@ func buildRequestHandling(msg *Message) (requestHandling, error) {
 			case FieldTypeU8:
 				rh.ParamDecls = append(rh.ParamDecls, "byte "+f.Name)
 				rh.ArgExprs = append(rh.ArgExprs, f.Name)
-				rh.Lines = append(rh.Lines, fmt.Sprintf("byte %s = p1;", f.Name))
+				rh.Lines = append(rh.Lines, fmt.Sprintf("byte %s = %s;", f.Name, names.p1))
 			case FieldTypeBool:
 				rh.ParamDecls = append(rh.ParamDecls, "boolean "+f.Name)
 				rh.ArgExprs = append(rh.ArgExprs, f.Name)
-				rh.Lines = append(rh.Lines, fmt.Sprintf("boolean %s = readBool(p1);", f.Name))
+				rh.Lines = append(rh.Lines, fmt.Sprintf("boolean %s = readBool(%s);", f.Name, names.p1))
 			default:
 				return requestHandling{}, fmt.Errorf("unsupported request field type %q", f.Type)
 			}
@@ -845,11 +825,11 @@ func buildRequestHandling(msg *Message) (requestHandling, error) {
 			case FieldTypeU8:
 				rh.ParamDecls = append(rh.ParamDecls, "byte "+f.Name)
 				rh.ArgExprs = append(rh.ArgExprs, f.Name)
-				rh.Lines = append(rh.Lines, fmt.Sprintf("byte %s = p2;", f.Name))
+				rh.Lines = append(rh.Lines, fmt.Sprintf("byte %s = %s;", f.Name, names.p2))
 			case FieldTypeBool:
 				rh.ParamDecls = append(rh.ParamDecls, "boolean "+f.Name)
 				rh.ArgExprs = append(rh.ArgExprs, f.Name)
-				rh.Lines = append(rh.Lines, fmt.Sprintf("boolean %s = readBool(p2);", f.Name))
+				rh.Lines = append(rh.Lines, fmt.Sprintf("boolean %s = readBool(%s);", f.Name, names.p2))
 			default:
 				return requestHandling{}, fmt.Errorf("unsupported request field type %q", f.Type)
 			}
@@ -858,69 +838,36 @@ func buildRequestHandling(msg *Message) (requestHandling, error) {
 			case FieldTypeU8:
 				rh.ParamDecls = append(rh.ParamDecls, "byte "+f.Name)
 				rh.ArgExprs = append(rh.ArgExprs, f.Name)
-				rh.Lines = append(rh.Lines, fmt.Sprintf("byte %s = readU8(requestData, %d);", f.Name, dataOffset))
+				rh.Lines = append(rh.Lines, fmt.Sprintf("byte %s = readU8(%s, %s + %d);", f.Name, names.requestData, names.requestOffset, dataOffset))
 				dataOffset++
 			case FieldTypeBool:
 				rh.ParamDecls = append(rh.ParamDecls, "boolean "+f.Name)
 				rh.ArgExprs = append(rh.ArgExprs, f.Name)
-				rh.Lines = append(rh.Lines, fmt.Sprintf("boolean %s = readBool(requestData, %d);", f.Name, dataOffset))
+				rh.Lines = append(rh.Lines, fmt.Sprintf("boolean %s = readBool(%s, %s + %d);", f.Name, names.requestData, names.requestOffset, dataOffset))
 				dataOffset++
 			case FieldTypeU16:
 				rh.ParamDecls = append(rh.ParamDecls, "short "+f.Name)
 				rh.ArgExprs = append(rh.ArgExprs, f.Name)
-				rh.Lines = append(rh.Lines, fmt.Sprintf("short %s = readU16(requestData, %d);", f.Name, dataOffset))
+				rh.Lines = append(rh.Lines, fmt.Sprintf("short %s = readU16(%s, %s + %d);", f.Name, names.requestData, names.requestOffset, dataOffset))
 				dataOffset += 2
 			case FieldTypeU32:
 				rh.ParamDecls = append(rh.ParamDecls, "int "+f.Name)
 				rh.ArgExprs = append(rh.ArgExprs, f.Name)
-				rh.Lines = append(rh.Lines, fmt.Sprintf("int %s = readU32(requestData, %d);", f.Name, dataOffset))
+				rh.Lines = append(rh.Lines, fmt.Sprintf("int %s = readU32(%s, %s + %d);", f.Name, names.requestData, names.requestOffset, dataOffset))
 				dataOffset += 4
-			case FieldTypeBytesFixed:
-				if f.FixedLength <= 0 {
-					return requestHandling{}, fmt.Errorf("fixed bytes request field %q must have length > 0", f.Name)
+			case FieldTypeBytesFixed, FieldTypeASCII, FieldTypeString, FieldTypeBytes:
+				offsetName, lengthName := names.take(f.Name+"Offset"), names.take(f.Name+"Length")
+				rh.ParamDecls = append(rh.ParamDecls, "byte[] "+f.Name, "short "+offsetName, "short "+lengthName)
+				rh.ArgExprs = append(rh.ArgExprs, names.requestData, offsetName, lengthName)
+				length := fmt.Sprintf("(short) (%s - %d)", names.requestLength, dataOffset)
+				if n, ok := byteSequenceFixedLength(f); ok {
+					length = fmt.Sprintf("(short) %d", n)
 				}
-				rh.ParamDecls = append(rh.ParamDecls, "byte[] "+f.Name)
-				rh.ArgExprs = append(rh.ArgExprs, f.Name)
-				rh.Lines = append(
-					rh.Lines,
-					fmt.Sprintf("byte[] %s = slice(requestData, %d, %d);", f.Name, dataOffset, f.FixedLength),
-				)
-				dataOffset += f.FixedLength
-			case FieldTypeASCII, FieldTypeString:
-				rh.ParamDecls = append(rh.ParamDecls, "byte[] "+f.Name)
-				rh.ArgExprs = append(rh.ArgExprs, f.Name)
-				if f.Type == FieldTypeString && f.Length != nil {
-					return requestHandling{}, fmt.Errorf("string request field %q does not support fixed length", f.Name)
+				rh.Lines = append(rh.Lines, fmt.Sprintf("short %s = (short) (%s + %d);", offsetName, names.requestOffset, dataOffset), fmt.Sprintf("short %s = %s;", lengthName, length))
+				if n, ok := byteSequenceFixedLength(f); ok {
+					dataOffset += n
 				}
-				if f.Length != nil {
-					rh.Lines = append(
-						rh.Lines,
-						fmt.Sprintf("byte[] %s = slice(requestData, %d, %d);", f.Name, dataOffset, *f.Length),
-					)
-					dataOffset += *f.Length
-					break
-				}
-				rh.Lines = append(
-					rh.Lines,
-					fmt.Sprintf(
-						"byte[] %s = slice(requestData, %d, requestData.length - %d);",
-						f.Name,
-						dataOffset,
-						dataOffset,
-					),
-				)
-			case FieldTypeBytes:
-				rh.ParamDecls = append(rh.ParamDecls, "byte[] "+f.Name)
-				rh.ArgExprs = append(rh.ArgExprs, f.Name)
-				rh.Lines = append(
-					rh.Lines,
-					fmt.Sprintf(
-						"byte[] %s = slice(requestData, %d, requestData.length - %d);",
-						f.Name,
-						dataOffset,
-						dataOffset,
-					),
-				)
+
 			default:
 				return requestHandling{}, fmt.Errorf("unsupported request field type %q", f.Type)
 			}
@@ -1047,10 +994,10 @@ func buildDispatchCasesBlock(methods []javaMethodRender) string {
 		}
 		fmt.Fprintf(&b, "            case %s:\n", method.INSConstName)
 		if method.HasHandler {
-			fmt.Fprintf(&b, "                return %s(p1, p2, requestData);\n", method.HandlerName)
+			fmt.Fprintf(&b, "                return %s(p1, p2, requestData, requestOffset, requestLength, output, outputOffset, outputCapacity);\n", method.HandlerName)
 		} else {
 			fmt.Fprintf(&b, "                %s();\n", method.AbstractName)
-			b.WriteString("                return empty;\n")
+			b.WriteString("                return (short) 0;\n")
 		}
 	}
 	return b.String()
@@ -1062,7 +1009,7 @@ func buildHandlersBlock(methods []javaMethodRender) string {
 		if method.IsStream || !method.HasHandler {
 			continue
 		}
-		fmt.Fprintf(&b, "    private byte[] %s(byte p1, byte p2, byte[] requestData) {\n", method.HandlerName)
+		fmt.Fprintf(&b, "    private short %s(%s) {\n", method.HandlerName, strings.Join(method.HandlerParams, ", "))
 		for _, line := range method.HandlerLines {
 			fmt.Fprintf(&b, "        %s\n", line)
 		}
@@ -1088,12 +1035,12 @@ func buildAbstractMethodsBlock(methods []javaMethodRender) string {
 		case responseKindPacked:
 			fmt.Fprintf(&b, "    /**\n")
 			fmt.Fprintf(&b, "     * %s\n", method.Signature)
-			fmt.Fprintf(&b, "     * Return encoded response bytes in schema field order.\n")
+			fmt.Fprintf(&b, "     * Write encoded response bytes in schema field order; return produced length.\n")
 			fmt.Fprintf(&b, "     */\n")
 		case responseKindBytes:
 			fmt.Fprintf(&b, "    /**\n")
 			fmt.Fprintf(&b, "     * %s\n", method.Signature)
-			fmt.Fprintf(&b, "     * Return response bytes.\n")
+			fmt.Fprintf(&b, "     * Write response bytes into the output span; return produced length.\n")
 			fmt.Fprintf(&b, "     */\n")
 		default:
 			fmt.Fprintf(&b, "    /** %s */\n", method.Signature)

@@ -1,11 +1,16 @@
 # Persistent stream workspace cleanup
 
+The measurements below describe the pre-ordinary-writer release and retained
+historical experiments. The ordinary Java source API has since migrated to
+caller-owned output spans; see [current writer target measurements and
+verification bounds](ORDINARY-OUTPUT-SPANS.md#current-target-measurements).
+
 The explicit Applet.StreamWorkspaceCleanup selector supports only
 whole-reply-area, and requires Applet.StreamWorkspace == "persistent".
 Unknown selectors, written-bytes-only and nonpersistent combinations are refused
 before returning any generated files. Empty cleanup preserves the released
-output, including default persistent full cleanup; scalar wire protocol and raw
-array handler signatures are unchanged. Published pluginapi/v0.1.1 retains its
+output, including default persistent full cleanup; scalar wire protocol and
+stream raw-array handler signatures are unchanged. Published pluginapi/v0.1.1 retains its
 unused written-mode constant as a compatibility symbol, not a supported mode.
 
 Request copies track their exact successful prefix; retries write nothing.
