@@ -102,7 +102,7 @@ func instrumentCleanup(t *testing.T, r *JavaGenerationResult) *JavaGenerationRes
 }
 
 func cleanupApplet() string {
-	signature := "byte[] input, short inputOffset, short inputLength, byte[] output, short outputOffset, short outputCapacity"
+	signature := "byte[] input, short inputOffset, short inputLength, byte[] output, short outputOffset, short outputCapacity, byte[] callerWorkspace, short callerWorkspaceOffset, short callerWorkspaceCapacity"
 	packet := `short n=inputLength; for(short l=0,r=(short)(n-1);l<=r;l++,r--){byte v=input[l];output[l]=input[r];CleanupHarness.stores++;output[r]=v;CleanupHarness.stores++;} return n;`
 	report := `short n=(short)(control==2||control==3?64:4);
  if(control==4)failStream((short)0x6985);
@@ -121,7 +121,7 @@ public final class StreamDemoApplet extends Applet {
  public void deselect(){adapter.deselect();}
  static int control=1;
  static final class Logic extends StreamDemoSkeleton {
-  Logic(){super(null);}protected byte onGetVersion(){return 1;}
+  Logic(){super(null);}protected byte onGetVersion(byte[] callerWorkspace, short callerWorkspaceOffset, short callerWorkspaceCapacity){return 1;}
   protected short onProcessPacketStream(SIGNATURE){PACKET}
   protected short onIssueReportStream(SIGNATURE){REPORT}
  }
@@ -179,8 +179,8 @@ public class CleanupHarness {
 }
 `
 
-// Four hashes retain the keeper's measured Auth stream/transport identity; the
-// skeleton hash freezes the authorized ordinary writer migration. Current target
+// Five hashes freeze the current v0.5.0 Auth-shaped target projection; the
+// historical keeper measurements remain in documentation. Current target
 // allocation/cost suites are rerun separately. Matching hashes does not replay
 // the changed consumer, provider internals or physical reset/RAM/NVM metrics.
 func TestPersistentCleanupWholeMeasuredAuthIdentity(t *testing.T) {
@@ -197,10 +197,10 @@ func TestPersistentCleanupWholeMeasuredAuthIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 	expected := map[string]string{
-		"BSimAuthBoundedStreamRuntime.java": "5063f440b42c08619274cd16206541c55c98004acd3e3c8b727c26e9af9fb90f",
-		"BSimAuthSkeleton.java":             "42ad5fa6ca43e93eb39e9d28e60b302ffd6bd51080a0e2f773c02e25f0d56cd7",
-		"BSimAuthStreamAPDUAdapter.java":    "ffeabcbc5fd61f86ce2fbe66912f0d8d228a1fbde4ac10737934e5c9ce49c8f8",
-		"BSimAuthStreamEndpoint.java":       "52af535eb9bf709701333862ea07d3e58f61f21ddbeac02da83465d525c05c09",
+		"BSimAuthBoundedStreamRuntime.java": "fb48a9958d7e12e4b9badde53dba1d0feea963feb2d85d1acf23240147d2ddb8",
+		"BSimAuthSkeleton.java":             "aa1a44cffb0e461613b000d5cbae3d51e72b71fcbdb91a6a38d017f848cfaddf",
+		"BSimAuthStreamAPDUAdapter.java":    "2cc5793bc033325919522eddfe54d2ecb7db6b4b0bf9fbc6fa88f9216c336c1b",
+		"BSimAuthStreamEndpoint.java":       "ad1c1af8a05c3b9138b00f5a368b9290c7f0935787a19656ddbd8f6a25eb8539",
 		"BSimAuthTransport.java":            "75ff6fd4b035769347be3c6debe4e458e0141a0544f2f779a727939c626fb279",
 	}
 	checked := 0
@@ -211,7 +211,7 @@ func TestPersistentCleanupWholeMeasuredAuthIdentity(t *testing.T) {
 		}
 		sum := sha256.Sum256(file.Data)
 		if hex.EncodeToString(sum[:]) != want {
-			t.Fatalf("measured Auth source drift: %s", file.Name)
+			t.Fatalf("current Auth target projection drift: %s", file.Name)
 		}
 		checked++
 	}

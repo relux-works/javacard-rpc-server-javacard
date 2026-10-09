@@ -89,7 +89,7 @@ func TestOrdinaryOutputSpanSourceContract(t *testing.T) {
 		"short first = readU16(requestData, requestOffset + 0);",
 		"int second = readU32(requestData, requestOffset + 2);",
 		"short payloadLength = (short) (requestLength - 2);",
-		"onEcho(prefix, requestData, payloadOffset, payloadLength, output, outputOffset, outputCapacity)",
+		"onEcho(prefix, requestData, payloadOffset, payloadLength, output, outputOffset, outputCapacity, callerWorkspace, callerWorkspaceOffset, callerWorkspaceCapacity)",
 		"if (requestLength != 6)",
 		"if (produced < 0 || produced > outputCapacity)",
 		"dstOff - srcOff < len",
@@ -104,7 +104,7 @@ func TestOrdinaryOutputSpanSourceContract(t *testing.T) {
 	}{{"GetAuthenticationIdentity", 127}, {"GetAuthAppletInfo", 13}, {"GetIssuer190", 190}, {"GetIssuer177", 177}} {
 		body := javaMethodBody(t, src, "handle"+row.name)
 		gate := fmt.Sprintf("if (outputCapacity < %d)", row.width)
-		call := fmt.Sprintf("on%s(output, outputOffset, (short) %d)", row.name, row.width)
+		call := fmt.Sprintf("on%s(output, outputOffset, (short) %d, callerWorkspace, callerWorkspaceOffset, callerWorkspaceCapacity)", row.name, row.width)
 		if strings.Index(body, gate) < 0 || strings.Index(body, gate) > strings.Index(body, call) || !strings.Contains(body, fmt.Sprintf("if (produced != %d)", row.width)) {
 			t.Errorf("capacity/callback/width wiring for %s", row.name)
 		}

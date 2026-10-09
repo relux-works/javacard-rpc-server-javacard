@@ -26,8 +26,10 @@ type parityMatrix struct {
 
 // This independent release matrix pins the Java projection of every core IDL,
 // workspace, lifecycle, simulator coordinate and namespace combination. The
-// authorized writer API break has a separate skeleton projection; all other
-// files still match the independent release. This is source parity, not wire
+// authorized v0.5.0 API break has a separate projection of skeleton/endpoint/
+// runtime/adapter; other files still match the independent release. Source
+// projection hashes freeze a reviewed delta, not independent behavioral proof.
+// This is source parity, not wire
 // execution. JVM wire witnesses exercise dispatchTo in the release lane.
 func TestPluginReleasedV045Parity(t *testing.T) {
 	b, e := os.ReadFile("testdata/parity-v0.4.5.json")
@@ -41,7 +43,7 @@ func TestPluginReleasedV045Parity(t *testing.T) {
 	if matrix.BaselineTag != "v0.4.5" || len(matrix.Cases) != 216 {
 		t.Fatalf("incomplete release matrix: %s %d", matrix.BaselineTag, len(matrix.Cases))
 	}
-	writerBytes, e := os.ReadFile("testdata/ordinary-writer-skeletons.json")
+	writerBytes, e := os.ReadFile("testdata/caller-workspace-v0.5.0.json")
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -49,8 +51,8 @@ func TestPluginReleasedV045Parity(t *testing.T) {
 	if e = json.Unmarshal(writerBytes, &writerHashes); e != nil {
 		t.Fatal(e)
 	}
-	if len(writerHashes) != 216 {
-		t.Fatal("incomplete writer skeleton projection")
+	if len(writerHashes) != 540 {
+		t.Fatalf("incomplete caller workspace projection: %d", len(writerHashes))
 	}
 	seen := map[string]bool{}
 	for _, tc := range matrix.Cases {
@@ -83,8 +85,8 @@ func TestPluginReleasedV045Parity(t *testing.T) {
 			for i, f := range files {
 				sum := sha256.Sum256(f.Data)
 				want := tc.Files[i].SHA256
-				if strings.HasSuffix(f.Name, "Skeleton.java") {
-					want = writerHashes[key]
+				if strings.HasSuffix(f.Name, "Skeleton.java") || strings.HasSuffix(f.Name, "StreamEndpoint.java") || strings.HasSuffix(f.Name, "BoundedStreamRuntime.java") || strings.HasSuffix(f.Name, "StreamAPDUAdapter.java") {
+					want = writerHashes[key+"|"+f.Name]
 				}
 				if f.Name != tc.Files[i].Name || hex.EncodeToString(sum[:]) != want {
 					t.Fatalf("release byte/order drift at file %d: %s", i, f.Name)

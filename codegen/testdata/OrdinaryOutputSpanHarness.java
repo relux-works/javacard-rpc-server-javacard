@@ -169,7 +169,7 @@ public final class OrdinaryOutputSpanHarness {
 
     // Fake adapter owns sending; failed dispatch never reaches this send site.
     static void call(Logic l,int ins,byte[] req,int off,int len,byte[] out,int outOff,int cap) {
-        short produced=l.dispatchTo((byte)ins,(byte)0,(byte)0,req,(short)off,(short)len,out,(short)outOff,(short)cap);
+        short produced=l.dispatchTo((byte)ins,(byte)0,(byte)0,req,(short)off,(short)len,out,(short)outOff,(short)cap, out, (short)outOff, (short)cap);
         require(produced >= 0 && produced <= cap);
         sent=Arrays.copyOfRange(out,outOff,outOff+produced);sends++;
     }
@@ -186,17 +186,17 @@ public final class OrdinaryOutputSpanHarness {
             for(short i=0;i<cap;i++)out[(short)(off+i)]=(byte)(i+ins);
             return forced==Integer.MIN_VALUE?cap:(short)forced;
         }
-        protected short onGetAuthenticationIdentity(byte[] out,short off,short cap){return fill(out,off,cap,1);}
-        protected short onGetAuthAppletInfo(byte[] out,short off,short cap){return fill(out,off,cap,2);}
-        protected short onGetIssuer190(byte[] out,short off,short cap){return fill(out,off,cap,3);}
-        protected short onGetIssuer177(byte[] out,short off,short cap){return fill(out,off,cap,4);}
-        protected byte onScalar0(){calls++;return (byte)0xFE;}
-        protected boolean onScalar1(){calls++;return true;}
-        protected short onScalar2(){calls++;return (short)0x1234;}
-        protected int onScalar3(){calls++;return 0x01020304;}
-        protected void onClear(){calls++;}
-        protected int onTyped(short first,int second){calls++;return second ^ (first & 0xFFFF);}
-        protected short onEcho(short prefix,byte[] payload,short payloadOffset,short payloadLength,byte[] out,short off,short cap){
+        protected short onGetAuthenticationIdentity(byte[] out,short off,short cap, byte[] callerWorkspace, short callerWorkspaceOffset, short callerWorkspaceCapacity){return fill(out,off,cap,1);}
+        protected short onGetAuthAppletInfo(byte[] out,short off,short cap, byte[] callerWorkspace, short callerWorkspaceOffset, short callerWorkspaceCapacity){return fill(out,off,cap,2);}
+        protected short onGetIssuer190(byte[] out,short off,short cap, byte[] callerWorkspace, short callerWorkspaceOffset, short callerWorkspaceCapacity){return fill(out,off,cap,3);}
+        protected short onGetIssuer177(byte[] out,short off,short cap, byte[] callerWorkspace, short callerWorkspaceOffset, short callerWorkspaceCapacity){return fill(out,off,cap,4);}
+        protected byte onScalar0(byte[] callerWorkspace, short callerWorkspaceOffset, short callerWorkspaceCapacity){calls++;return (byte)0xFE;}
+        protected boolean onScalar1(byte[] callerWorkspace, short callerWorkspaceOffset, short callerWorkspaceCapacity){calls++;return true;}
+        protected short onScalar2(byte[] callerWorkspace, short callerWorkspaceOffset, short callerWorkspaceCapacity){calls++;return (short)0x1234;}
+        protected int onScalar3(byte[] callerWorkspace, short callerWorkspaceOffset, short callerWorkspaceCapacity){calls++;return 0x01020304;}
+        protected void onClear(byte[] callerWorkspace, short callerWorkspaceOffset, short callerWorkspaceCapacity){calls++;}
+        protected int onTyped(short first,int second, byte[] callerWorkspace, short callerWorkspaceOffset, short callerWorkspaceCapacity){calls++;return second ^ (first & 0xFFFF);}
+        protected short onEcho(short prefix,byte[] payload,short payloadOffset,short payloadLength,byte[] out,short off,short cap, byte[] callerWorkspace, short callerWorkspaceOffset, short callerWorkspaceCapacity){
             calls++;require(prefix==payloadLength);
             if(forced!=Integer.MIN_VALUE)return (short)forced;
             if(payloadLength>cap)throw statusWordFailure(WRONG_LENGTH);

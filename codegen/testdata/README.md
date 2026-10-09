@@ -24,10 +24,27 @@ Unknown workspace and transient-memory options are also checked directly against
 the plugin, requiring no partial package. Namespace/schema refusals have valid
 controls. The full raw CLI matrix remains a core compatibility test.
 
-The Java golden files and JVM harnesses are unchanged donor fixtures. Original
+The Java golden files and JVM harnesses are maintained target fixtures. Original
 JavaCard regression test names are retained; their test-only generation helpers
 now unpack `Plugin.Generate` instead of calling renderer wrappers. The policy
 test drives backend policy refusal directly; it does not claim parser coverage.
 CAP and real simulator checks require explicit toolchain configuration and are
 separate from the JVM stand-in lane. No physical card or NVM endurance claim is
 made. Persistent cleanup remains exactly as v0.4.5; proportional wiping is deferred.
+
+The v0.5.0 caller-workspace API separately freezes 540 changed file hashes across
+the same 216 rows in `caller-workspace-v0.5.0.json`: every skeleton, and each
+stream endpoint/runtime/adapter. Other files still match the independent release
+matrix. `ordinary-writer-skeletons.json` remains the historical v0.4.0 projection.
+The new projection is candidate source identity, not an independent behavioral
+oracle. Existing named reviewer tests and all fixtures migrate the trailing
+scratch triple; the counter golden is regenerated from the maintained schema.
+
+`CallerWorkspaceLogic.java` is the trusted CAP-compatible business fixture with
+explicit 196/260 phase minima, precise input-last-consumer ordering and no borrowed
+buffer fields. `CallerWorkspaceHarness.java` supplies independent identity/span,
+boundary/refusal/retry, result lifetime and generated-field retention oracles.
+Its host-only subclass retains expected test references deliberately; generated
+classes and the CAP logic do not. `CallerWorkspaceApplet.java` and
+`CallerWorkspaceAPDUHarness.java` drive the actual simulator process/send path.
+See [the API and evidence limits](../../CALLER-WORKSPACE.md).

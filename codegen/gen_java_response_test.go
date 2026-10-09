@@ -71,7 +71,7 @@ public final class FixedResponseHarness {
     }
 
     private static void assertAccepted(int length) {
-        short produced = new Logic(length).dispatchTo((byte) 0x01, (byte) 0, (byte) 0, null, (short)0, (short)0, new byte[32], (short)3, (short)29);
+        short produced = new Logic(length).dispatchTo((byte) 0x01, (byte) 0, (byte) 0, null, (short)0, (short)0, new byte[32], (short)3, (short)29, new byte[32], (short)3, (short)29);
         if (produced != length) {
             throw new AssertionError("unexpected response length " + produced);
         }
@@ -79,7 +79,7 @@ public final class FixedResponseHarness {
 
     private static void assertRejected(int length) {
         try {
-            new Logic(length).dispatchTo((byte) 0x01, (byte) 0, (byte) 0, null, (short)0, (short)0, new byte[32], (short)3, (short)29);
+            new Logic(length).dispatchTo((byte) 0x01, (byte) 0, (byte) 0, null, (short)0, (short)0, new byte[32], (short)3, (short)29, new byte[32], (short)3, (short)29);
             throw new AssertionError("accepted " + length + "-byte fixed response");
         } catch (FixedDemoSkeleton.StatusWordException expected) {
             if (expected.getStatusWord() != (short) 0x6700) {
@@ -100,7 +100,7 @@ public final class FixedResponseHarness {
             produced = (short)length;
         }
 
-        protected short onGetInfo(byte[] output, short outputOffset, short outputCapacity) {
+        protected short onGetInfo(byte[] output, short outputOffset, short outputCapacity, byte[] callerWorkspace, short callerWorkspaceOffset, short callerWorkspaceCapacity) {
             return produced;
         }
     }

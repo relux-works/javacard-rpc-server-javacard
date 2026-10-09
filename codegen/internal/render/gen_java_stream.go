@@ -32,6 +32,8 @@ public interface {{.StreamEndpointName}} {
      * Return the response length. Protocol failures use the runtime's one
      * reusable StreamStatusWordException; generated skeleton handlers use
      * failStream(statusWord). No command-path allocation is permitted.
+     * Caller workspace is borrowed only for this dispatch. Invalid workspace
+     * refuses before session effects and does not clear a valid pending session.
      */
     short dispatch(
             byte methodId,
@@ -51,7 +53,10 @@ public interface {{.StreamEndpointName}} {
             short requestLength,
             byte[] responseBuffer,
             short responseOffset,
-            short responseCapacity);
+            short responseCapacity,
+            byte[] callerWorkspace,
+            short callerWorkspaceOffset,
+            short callerWorkspaceCapacity);
 
     void abort(byte reason);
 
@@ -62,6 +67,9 @@ public interface {{.StreamEndpointName}} {
          * is the exact declared width and the returned length must equal it.
          * Use the generated skeleton's failStream(statusWord) helper for a
          * business status word.
+         * Caller workspace is the actual entry span, independent of the owned
+         * session output. Never retain borrowed references; consume overlapping
+         * input before scratch writes and preserve output through its final read.
          */
         short execute(
                 byte methodId,
@@ -70,7 +78,10 @@ public interface {{.StreamEndpointName}} {
                 short inputLength,
                 byte[] output,
                 short outputOffset,
-                short outputCapacity);
+                short outputCapacity,
+                byte[] callerWorkspace,
+                short callerWorkspaceOffset,
+                short callerWorkspaceCapacity);
     }
 
     interface Sha256 {
@@ -224,7 +235,16 @@ public final class {{.StreamRuntimeName}} implements {{.StreamEndpointName}} {
             short requestLength,
             byte[] responseBuffer,
             short responseOffset,
-            short responseCapacity) {
+            short responseCapacity,
+            byte[] callerWorkspace,
+            short callerWorkspaceOffset,
+            short callerWorkspaceCapacity) {
+        // Validate borrowed authority before reset cleanup or any session effect.
+        if (callerWorkspace == null || callerWorkspaceOffset < 0 || callerWorkspaceCapacity < 0 ||
+                callerWorkspaceOffset > callerWorkspace.length ||
+                callerWorkspaceCapacity > callerWorkspace.length - callerWorkspaceOffset) {
+            rejectWithoutClearing(SW_WRONG_LENGTH);
+        }
         try {
 {{if .StreamWorkspacePersistent}}            // Transient state is already empty after reset; clean retained NVM
             // before any command can expose or reuse it, including stale reads.
@@ -263,10 +283,12 @@ public final class {{.StreamRuntimeName}} implements {{.StreamEndpointName}} {
             switch (operation) {
                 case OP_WRITE_OR_INVOKE:
                     return writeOrInvoke(p1, p2, requestBuffer, requestOffset, requestLength,
-                            responseBuffer, responseOffset, responseCapacity);
+                            responseBuffer, responseOffset, responseCapacity,
+                            callerWorkspace, callerWorkspaceOffset, callerWorkspaceCapacity);
                 case OP_CLOSE_WRITE:
                     return closeWrite(p1, p2, requestBuffer, requestOffset, requestLength,
-                            responseBuffer, responseOffset, responseCapacity);
+                            responseBuffer, responseOffset, responseCapacity,
+                            callerWorkspace, callerWorkspaceOffset, callerWorkspaceCapacity);
                 case OP_GET_PENDING_READ_INFO:
                     requireEmptyCommand(p1, p2, requestLength);
                     return pendingInfo(responseBuffer, responseOffset, responseCapacity);
@@ -356,7 +378,10 @@ public final class {{.StreamRuntimeName}} implements {{.StreamEndpointName}} {
             short requestLength,
             byte[] response,
             short responseOffset,
-            short responseCapacity) {
+            short responseCapacity,
+            byte[] callerWorkspace,
+            short callerWorkspaceOffset,
+            short callerWorkspaceCapacity) {
         if (!hasRequestStream()) {
             if (scalars[IDX_STATE] != STATE_EMPTY) {
                 rejectWithoutClearing(SW_WRONG_STATE);
@@ -364,7 +389,8 @@ public final class {{.StreamRuntimeName}} implements {{.StreamEndpointName}} {
             requireZeroParameters(p1, p2);
             preflightHandlerResponse(responseCapacity);
             return executeOnce(request, requestOffset, requestLength,
-                    response, responseOffset, responseCapacity, false);
+                    response, responseOffset, responseCapacity, false,
+                    callerWorkspace, callerWorkspaceOffset, callerWorkspaceCapacity);
         }
 
         int index = p1 & 0xFF;
@@ -420,7 +446,10 @@ public final class {{.StreamRuntimeName}} implements {{.StreamEndpointName}} {
             short requestLength,
             byte[] response,
             short responseOffset,
-            short responseCapacity) {
+            short responseCapacity,
+            byte[] callerWorkspace,
+            short callerWorkspaceOffset,
+            short callerWorkspaceCapacity) {
         requireZeroParameters(p1, p2);
         requireCloseData(requestLength);
 
@@ -449,7 +478,8 @@ public final class {{.StreamRuntimeName}} implements {{.StreamEndpointName}} {
             fail(SW_INVALID_DATA);
         }
         return executeOnce(workspace, (short) 0, scalars[IDX_INPUT_LENGTH],
-                response, responseOffset, responseCapacity, true);
+                response, responseOffset, responseCapacity, true,
+                callerWorkspace, callerWorkspaceOffset, callerWorkspaceCapacity);
     }
 
     private short shortOutputCapacity() {
@@ -469,14 +499,18 @@ public final class {{.StreamRuntimeName}} implements {{.StreamEndpointName}} {
             byte[] response,
             short responseOffset,
             short responseCapacity,
-            boolean preserveInputCloseReceipt) {
+            boolean preserveInputCloseReceipt,
+            byte[] callerWorkspace,
+            short callerWorkspaceOffset,
+            short callerWorkspaceCapacity) {
         short outputCapacity = hasResponseStream() ?
                 scalars[IDX_RESPONSE_MAX_LENGTH] : shortOutputCapacity();
 {{if .StreamCleanupTracked}}        // Mark before entering user code: scratch and exceptions are covered.
         markWritten((short) 0, outputCapacity);
 {{end}}        short produced = ((Handler) handlerSlot[IDX_HANDLER]).execute(
                 (byte) scalars[IDX_ACTIVE_METHOD], input, inputOffset, inputSize,
-                workspace, (short) 0, outputCapacity);
+                workspace, (short) 0, outputCapacity,
+                callerWorkspace, callerWorkspaceOffset, callerWorkspaceCapacity);
         if (produced < 0 || produced > outputCapacity ||
                 (hasResponseStream() && produced == 0) ||
                 (!hasResponseStream() && scalars[IDX_EXACT_SHORT_RESPONSE_LENGTH] >= 0 &&
@@ -753,7 +787,10 @@ public final class {{.StreamAPDUAdapterName}} {
                     incomingLength,
                     ioScratch,
                     (short) 0,
-                    IO_CAPACITY);
+                    IO_CAPACITY,
+                    apduBuffer,
+                    (short) 0,
+                    (short) apduBuffer.length);
             if (outcome > 0) {
                 apdu.setOutgoing();
                 apdu.setOutgoingLength(outcome);
@@ -1029,6 +1066,8 @@ func buildJavaStreamDispatchSupport(data *javaTemplateData, methods []javaMethod
      * No-allocation dispatch used by the generated Java Card APDU adapter.
      * Returns a response length. Protocol failures are translated to
      * ISOException without allocating on the command path.
+     * The caller supplies its actual legal scratch span separately from I/O.
+     * No borrowed scratch reference is stored in the skeleton or stream session.
      */
     public final short dispatchStreamTo(
             byte ins,
@@ -1039,7 +1078,10 @@ func buildJavaStreamDispatchSupport(data *javaTemplateData, methods []javaMethod
             short requestLength,
             byte[] responseBuffer,
             short responseOffset,
-            short responseCapacity) {
+            short responseCapacity,
+            byte[] callerWorkspace,
+            short callerWorkspaceOffset,
+            short callerWorkspaceCapacity) {
         short row = streamRow(ins);
         if (row < (short) 0) {
             ISOException.throwIt(SW_INS_NOT_SUPPORTED);
@@ -1056,7 +1098,8 @@ func buildJavaStreamDispatchSupport(data *javaTemplateData, methods []javaMethod
                     STREAM_LIMITS[(short) (limits + 2)], STREAM_LIMITS[(short) (limits + 3)],
                     STREAM_LIMITS[(short) (limits + 4)], this,
                     p1, p2, requestBuffer, requestOffset, requestLength,
-                    responseBuffer, responseOffset, responseCapacity);
+                    responseBuffer, responseOffset, responseCapacity,
+                    callerWorkspace, callerWorkspaceOffset, callerWorkspaceCapacity);
         } catch (`)
 	b.WriteString(data.StreamEndpointName)
 	b.WriteString(`.StreamStatusWordException failure) {
@@ -1128,7 +1171,10 @@ func buildJavaStreamAbstractSupport(data *javaTemplateData, methods []javaMethod
             short inputLength,
             byte[] output,
             short outputOffset,
-            short outputCapacity) {
+            short outputCapacity,
+            byte[] callerWorkspace,
+            short callerWorkspaceOffset,
+            short callerWorkspaceCapacity) {
         switch (methodId) {
 `)
 	methodID := byte(1)
@@ -1138,7 +1184,7 @@ func buildJavaStreamAbstractSupport(data *javaTemplateData, methods []javaMethod
 		}
 		fmt.Fprintf(&b, "            case %d:\n", methodID)
 		fmt.Fprintf(&b, "                return on%sStream(input, inputOffset, inputLength,\n", toPascal(method.Name))
-		b.WriteString("                        output, outputOffset, outputCapacity);\n")
+		b.WriteString("                        output, outputOffset, outputCapacity, callerWorkspace, callerWorkspaceOffset, callerWorkspaceCapacity);\n")
 		methodID++
 	}
 	b.WriteString(`            default:
@@ -1161,7 +1207,8 @@ func buildJavaStreamAbstractSupport(data *javaTemplateData, methods []javaMethod
 		fmt.Fprintf(&b, "    /** %s; return response length and use failStream for a status word. */\n", method.Signature)
 		fmt.Fprintf(&b, "    protected abstract short on%sStream(\n", toPascal(method.Name))
 		b.WriteString("            byte[] input, short inputOffset, short inputLength,\n")
-		b.WriteString("            byte[] output, short outputOffset, short outputCapacity);\n\n")
+		b.WriteString("            byte[] output, short outputOffset, short outputCapacity,\n")
+		b.WriteString("            byte[] callerWorkspace, short callerWorkspaceOffset, short callerWorkspaceCapacity);\n\n")
 	}
 	return strings.TrimSuffix(b.String(), "\n")
 }

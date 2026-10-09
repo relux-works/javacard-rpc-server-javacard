@@ -28,6 +28,11 @@ func TestRequiredCAPTargetFailsWhenAntIsUnavailable(t *testing.T) {
 	if !strings.Contains(string(output), "ant is required") {
 		t.Fatalf("required CAP target failed for the wrong reason: %v\n%s", err, output)
 	}
+	exit, ok := err.(*exec.ExitError)
+	if !ok || exit.ExitCode() != 2 {
+		t.Fatalf("unexpected required CAP target exit: %v\n%s", err, output)
+	}
+	t.Logf("expected-red missing-Ant control: make exit=%d\n%s", exit.ExitCode(), output)
 }
 
 func TestGeneratedJavaStreamPackageConvertsToCAP(t *testing.T) {
@@ -115,6 +120,8 @@ func convertCleanupCAP(t *testing.T, ant, antJavaCardJar, jckitDir, policy strin
 	command.Dir = root
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("CAP conversion failed: %v\n%s", err, output)
+	} else {
+		t.Log(string(output))
 	}
 	info, err := os.Stat(filepath.Join(root, "streamdemo.cap"))
 	if err != nil || info.Size() == 0 {

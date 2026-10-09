@@ -31,7 +31,7 @@ public final class OrdinaryOutputSpanApplet extends Applet {
         try {
             short produced = logic.dispatchTo(ins, p1, p2,
                     buffer, requestOffset, length,
-                    buffer, outputOffset, (short) (buffer.length - outputOffset));
+                    buffer, outputOffset, (short) (buffer.length - outputOffset), buffer, outputOffset, (short) (buffer.length - outputOffset));
             if (produced > 0) {
                 apdu.setOutgoing();
                 apdu.setOutgoingLength(produced);
@@ -52,18 +52,18 @@ public final class OrdinaryOutputSpanApplet extends Applet {
             if (forced == (byte) 3) return (short) (cap + 1);
             return cap;
         }
-        protected short onGetAuthenticationIdentity(byte[] out, short off, short cap) { return fill(out, off, cap, (byte) 1); }
-        protected short onGetAuthAppletInfo(byte[] out, short off, short cap) { return fill(out, off, cap, (byte) 2); }
-        protected short onGetIssuer190(byte[] out, short off, short cap) { return fill(out, off, cap, (byte) 3); }
-        protected short onGetIssuer177(byte[] out, short off, short cap) { return fill(out, off, cap, (byte) 4); }
-        protected byte onScalar0() { return (byte) 0xFE; }
-        protected boolean onScalar1() { return true; }
-        protected short onScalar2() { return (short) 0x1234; }
-        protected int onScalar3() { return 0x01020304; }
-        protected void onClear() {}
-        protected int onTyped(short first, int second) { return second ^ (first & 0xFFFF); }
+        protected short onGetAuthenticationIdentity(byte[] out, short off, short cap, byte[] callerWorkspace, short callerWorkspaceOffset, short callerWorkspaceCapacity) { return fill(out, off, cap, (byte) 1); }
+        protected short onGetAuthAppletInfo(byte[] out, short off, short cap, byte[] callerWorkspace, short callerWorkspaceOffset, short callerWorkspaceCapacity) { return fill(out, off, cap, (byte) 2); }
+        protected short onGetIssuer190(byte[] out, short off, short cap, byte[] callerWorkspace, short callerWorkspaceOffset, short callerWorkspaceCapacity) { return fill(out, off, cap, (byte) 3); }
+        protected short onGetIssuer177(byte[] out, short off, short cap, byte[] callerWorkspace, short callerWorkspaceOffset, short callerWorkspaceCapacity) { return fill(out, off, cap, (byte) 4); }
+        protected byte onScalar0(byte[] callerWorkspace, short callerWorkspaceOffset, short callerWorkspaceCapacity) { return (byte) 0xFE; }
+        protected boolean onScalar1(byte[] callerWorkspace, short callerWorkspaceOffset, short callerWorkspaceCapacity) { return true; }
+        protected short onScalar2(byte[] callerWorkspace, short callerWorkspaceOffset, short callerWorkspaceCapacity) { return (short) 0x1234; }
+        protected int onScalar3(byte[] callerWorkspace, short callerWorkspaceOffset, short callerWorkspaceCapacity) { return 0x01020304; }
+        protected void onClear(byte[] callerWorkspace, short callerWorkspaceOffset, short callerWorkspaceCapacity) {}
+        protected int onTyped(short first, int second, byte[] callerWorkspace, short callerWorkspaceOffset, short callerWorkspaceCapacity) { return second ^ (first & 0xFFFF); }
         protected short onEcho(short prefix, byte[] payload, short payloadOffset, short payloadLength,
-                byte[] out, short off, short cap) {
+                byte[] out, short off, short cap, byte[] callerWorkspace, short callerWorkspaceOffset, short callerWorkspaceCapacity) {
             if (prefix != payloadLength || payloadLength > cap) throw statusWordFailure(ISO7816.SW_WRONG_LENGTH);
             packBytes(out, off, payload, payloadOffset, payloadLength);
             return payloadLength;

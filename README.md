@@ -3,19 +3,19 @@
 Java Card code-generation backend and on-card runtime for
 [javacard-rpc](https://github.com/relux-works/javacard-rpc). The root repository tag
 versions both components: the Go backend lives in codegen/ and the Java runtime
-keeps its normal root Gradle layout. The `v0.4.0` release candidate pairs Go module
-version `v0.4.0` with runtime version `0.4.0` at the same repository commit. Runtime
-coordinates are `io.jcrpc:javacard-rpc-server-javacard:0.4.0`; the group, artifact
+keeps its normal root Gradle layout. The `v0.5.0` release candidate pairs Go module
+version `v0.5.0` with runtime version `0.5.0` at the same repository commit. Runtime
+coordinates are `io.jcrpc:javacard-rpc-server-javacard:0.5.0`; the group, artifact
 name and Java package `io.jcrpc.server` are unchanged.
 
 ## Version pins
 
 Use the root module version for the backend:
 
-The following pins and tag commands apply once `v0.4.0` is published.
+The following pins and tag commands apply once `v0.5.0` is published.
 
 ```sh
-go get github.com/relux-works/javacard-rpc-server-javacard@v0.4.0
+go get github.com/relux-works/javacard-rpc-server-javacard@v0.5.0
 ```
 
 Build the runtime from the same root tag with the included Gradle wrapper:
@@ -23,16 +23,16 @@ Build the runtime from the same root tag with the included Gradle wrapper:
 ```sh
 git clone https://github.com/relux-works/javacard-rpc-server-javacard.git
 cd javacard-rpc-server-javacard
-git verify-tag v0.4.0
-git checkout --detach v0.4.0
-git rev-parse 'v0.4.0^{commit}'
+git verify-tag v0.5.0
+git checkout --detach v0.5.0
+git rev-parse 'v0.5.0^{commit}'
 ./gradlew build --no-daemon
 ```
 
 The peeled tag commit identifies both components; the runtime jar is
-`build/libs/javacard-rpc-server-javacard-0.4.0.jar`. These instructions build
+`build/libs/javacard-rpc-server-javacard-0.5.0.jar`. These instructions build
 from source; they do not require a Maven repository publication. See
-[release notes](RELEASE-NOTES-0.4.0.md) for compatibility and verification limits.
+[release notes](RELEASE-NOTES-0.5.0.md) for compatibility and verification limits.
 
 ## Requirements
 
@@ -71,15 +71,18 @@ name, dependencies, Maven group/artifact names and Java package are preserved.
 
 ## Ordinary output writer API
 
-The planned v0.4.0 generated Java API uses caller-owned output spans through
+The planned v0.5.0 generated Java API uses caller-owned output spans through
 `dispatchTo(...)`. Byte-sequence and packed callbacks write into an output span
 and return a produced length; scalar and void callbacks retain their return types.
-This is an intentional source break with no compatibility shim. See the
+This is an intentional source break with no compatibility shim. v0.5.0 also
+appends a separate bounded caller workspace to dispatch and every ordinary and
+stream callback; fixed reply capacity and result counts stay independent. See the
 [API, ownership, aliasing and migration contract](ORDINARY-OUTPUT-SPANS.md).
-Generated ordinary local/span names are allocated against all request field
-names, including later fields and occupied suffixes. Callback argument types and
-order are unchanged; consumers may continue using fields such as output,
-produced, result and payloadOffset.
+Generated ordinary local/span/workspace names are allocated against all request
+field names, including later fields and occupied suffixes. Existing leading
+callback arguments and return types are preserved; a workspace triple is
+appended. See [caller workspace migration](CALLER-WORKSPACE.md). Consumers may
+continue using fields such as output, produced, result and payloadOffset.
 
 ## Tools and validation
 
@@ -94,6 +97,8 @@ produced, result and payloadOffset.
 | Ant / ant-javacard / Java Card SDK | JCRPC_ANT_JAVACARD_JAR=/path/ant-javacard.jar JCRPC_JCKIT_DIR=/path/jc305u4_kit JAVA_HOME=/path/jdk11 PATH=/path/jdk11/bin:$PATH make test-cap | Ordinary writer, default and explicit whole-reply cleanup verified CAP inventories in test temporary directories |
 | Relux jCardSim / JDK 17 | JCRPC_JCARDSIM_JAR=/path/jcardsim-3.0.5.9-relux.1.jar make test-simulator | Real simulator lifecycle, allocation, cost and intended-violation controls in test temporary directories |
 | Go mutation runner | JCRPC_JCKIT_DIR=/path/jc305u4_kit JCRPC_JCARDSIM_JAR=/path/jcardsim-3.0.5.9-relux.1.jar go run ./.scripts/check-mutants --out .temp/mutants-01 | Disposable candidate fixtures, per-mutant logs and receipts.json |
+| Caller workspace / JDK 17 | JCRPC_JCARDSIM_JAR=/path/jcardsim-3.0.5.9-relux.1.jar go test ./codegen -run '^TestCallerWorkspace(JVM\|RealSimulator\|NarrowingMutants\|ReferenceMutants\|ConsumerMinimumMutants)$' -count=1 -v | Console; capture raw logs under .temp/ |
+| Caller workspace / Classic | Same CAP environment as make test-cap; optionally set JCRPC_CAP_EVIDENCE_DIR=.temp/caller-caps; go test ./codegen -run '^TestCallerWorkspaceClassicCAP$' -count=1 -v | Six verified mixed-schema CAPs and full converter logs under the selected evidence directory |
 | Git | git diff --check: whitespace validation | Console |
 
 Ensure java and javac on PATH match the selected native lane. Relux jCardSim is

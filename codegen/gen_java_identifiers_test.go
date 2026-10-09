@@ -32,7 +32,7 @@ func ordinaryIdentifierCases() []ordinaryIdentifierCase {
 		{"positive-borrowed", []Field{{Name: "payload", Type: FieldTypeBytesFixed, FixedLength: 2}, {Name: "marker", Type: FieldTypeU8}}, nil},
 		{"borrowed-suffix", []Field{{Name: "payload", Type: FieldTypeBytesFixed, FixedLength: 2}, {Name: "payloadOffset", Type: FieldTypeU8}}, nil},
 	}
-	for _, name := range []string{"p1", "p2", "requestData", "requestOffset", "requestLength", "outputOffset", "outputCapacity", "value"} {
+	for _, name := range []string{"p1", "p2", "requestData", "requestOffset", "requestLength", "outputOffset", "outputCapacity", "value", "callerWorkspace", "callerWorkspaceOffset", "callerWorkspaceCapacity"} {
 		rows = append(rows, ordinaryIdentifierCase{"window-" + name, []Field{{Name: name, Type: FieldTypeU8}}, fixed})
 	}
 	rows = append(rows,
@@ -148,6 +148,7 @@ func assertIdentifierCallback(t *testing.T, tc ordinaryIdentifierCase, src strin
 	if writer {
 		want = append(want, "byte[]", "short", "short")
 	}
+	want = append(want, "byte[]", "short", "short")
 	var got []string
 	if match[2] != "" {
 		for _, p := range strings.Split(match[2], ",") {
@@ -163,7 +164,7 @@ func assertIdentifierCallback(t *testing.T, tc ordinaryIdentifierCase, src strin
 // bounded property probes 0..32 occupied suffixes for each generated base, with
 // a byte-sequence field and its companions in the same complete namespace.
 func TestOrdinaryIdentifierSourceSuffixProperty(t *testing.T) {
-	for _, base := range []string{"p1", "p2", "requestData", "requestOffset", "requestLength", "output", "outputOffset", "outputCapacity", "result", "produced", "payloadOffset", "payloadLength"} {
+	for _, base := range []string{"p1", "p2", "requestData", "requestOffset", "requestLength", "output", "outputOffset", "outputCapacity", "result", "produced", "payloadOffset", "payloadLength", "callerWorkspace", "callerWorkspaceOffset", "callerWorkspaceCapacity"} {
 		for count := 0; count <= 32; count++ {
 			t.Run(fmt.Sprintf("%s/%d", base, count), func(t *testing.T) {
 				fields := []Field{{Name: "payload", Type: FieldTypeBytesFixed, FixedLength: 2}, {Name: base, Type: FieldTypeU8}}
@@ -311,6 +312,8 @@ func identifierHarness(tc ordinaryIdentifierCase) string {
 		checks = append(checks, fmt.Sprintf("check(start == 7 && capacity == %d, \"writer window\");", capacity))
 		body = fmt.Sprintf("for (short i=0; i<%d; i++) destination[(short)(start+i)] = (byte)(0x63+17*i); return (short)%d;", width, width)
 	}
+	params = append(params, "byte[] scratch", "short scratchOffset", "short scratchCapacity")
+	checks = append(checks, `check(scratch != null && scratchOffset == 7 && scratchCapacity == 126, "caller workspace window");`)
 	return fmt.Sprintf(`package io.probe;
 public final class IdentifierHarness extends ProbeSkeleton {
     private short calls;
@@ -325,7 +328,7 @@ public final class IdentifierHarness extends ProbeSkeleton {
         for (short i=0; i<wire.length; i++) input[(short)(5+i)] = wire[i];
         byte[] output = new byte[133];
         for (short i=0; i<output.length; i++) output[i] = (byte)0x5A;
-        short produced = logic.dispatchTo((byte)1, (byte)%d, (byte)%d, input, (short)5, (short)wire.length, output, (short)7, (short)126);
+        short produced = logic.dispatchTo((byte)1, (byte)%d, (byte)%d, input, (short)5, (short)wire.length, output, (short)7, (short)126, output, (short)7, (short)126);
         check(produced == %d && logic.calls == 1, "produced/callback count");
         for (short i=0; i<output.length; i++) {
             byte expected = (byte)0x5A;

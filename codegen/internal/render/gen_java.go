@@ -69,16 +69,22 @@ public abstract class {{.ClassName}} {
      * before writing output. Handlers must respect capacity and never retain
      * request/output references. A rejected call yields no sendable length;
      * output may already contain handler writes and is not rolled back.
+     * Caller workspace is a separate nonnull bounded borrowed span, including
+     * valid empty spans. Its capacity never widens the exact reply capacity.
+     * Consume live input before overlapping scratch writes and preserve live
+     * output through the final send. All borrowed references are command-local.
      */
     public final short dispatchTo(byte ins, byte p1, byte p2,
             byte[] requestBuffer, short requestOffset, short requestLength,
-            byte[] output, short outputOffset, short outputCapacity) {
+            byte[] output, short outputOffset, short outputCapacity,
+            byte[] callerWorkspace, short callerWorkspaceOffset, short callerWorkspaceCapacity) {
         if (requestBuffer == null && (requestOffset != 0 || requestLength != 0)) {
             throw statusWordFailure(SW_WRONG_LENGTH);
         }
         byte[] requestData = safeBytes(requestBuffer);
         checkWindow(requestData, requestOffset, requestLength);
         checkWindow(output, outputOffset, outputCapacity);
+        checkWindow(callerWorkspace, callerWorkspaceOffset, callerWorkspaceCapacity);
         switch (ins) {
 {{.DispatchCasesBlock}}            default:
                 throw statusWordFailure(SW_INS_NOT_SUPPORTED);
@@ -661,7 +667,10 @@ func renderMethod(name string, m *Method) (javaMethodRender, error) {
 		lines = append(lines, fmt.Sprintf("if (%s < %d) {", names.outputCapacity, width), "    throw statusWordFailure(SW_WRONG_LENGTH);", "}")
 	}
 	args := strings.Join(request.ArgExprs, ", ")
-	call := fmt.Sprintf("%s(%s)", mr.AbstractName, args)
+	workspaceArgExprs := []string{names.callerWorkspace, names.callerWorkspaceOffset, names.callerWorkspaceCapacity}
+	workspaceArgs := strings.Join(workspaceArgExprs, ", ")
+	callbackArgs := append(append([]string{}, request.ArgExprs...), workspaceArgExprs...)
+	call := fmt.Sprintf("%s(%s)", mr.AbstractName, strings.Join(callbackArgs, ", "))
 	switch {
 	case len(fields) == 0:
 		mr.AbstractReturn = "void"
@@ -695,7 +704,7 @@ func renderMethod(name string, m *Method) (javaMethodRender, error) {
 		if fixed {
 			capacity = fmt.Sprintf("(short) %d", width)
 		}
-		lines = append(lines, fmt.Sprintf("short %s = %s(%s%s, %s, %s);", names.produced, mr.AbstractName, args, names.output, names.outputOffset, capacity), fmt.Sprintf("if (%s < 0 || %s > %s) {", names.produced, names.produced, names.outputCapacity), "    throw statusWordFailure(SW_WRONG_LENGTH);", "}")
+		lines = append(lines, fmt.Sprintf("short %s = %s(%s%s, %s, %s, %s);", names.produced, mr.AbstractName, args, names.output, names.outputOffset, capacity, workspaceArgs), fmt.Sprintf("if (%s < 0 || %s > %s) {", names.produced, names.produced, names.outputCapacity), "    throw statusWordFailure(SW_WRONG_LENGTH);", "}")
 		if fixed {
 			lines = append(lines, fmt.Sprintf("if (%s != %d) {", names.produced, width), "    throw statusWordFailure(SW_WRONG_LENGTH);", "}")
 		}
@@ -703,6 +712,9 @@ func renderMethod(name string, m *Method) (javaMethodRender, error) {
 	}
 	mr.HandlerLines = appendHandlerBody(request, lines...)
 	mr.HandlerParams = []string{"byte " + names.p1, "byte " + names.p2, "byte[] " + names.requestData, "short " + names.requestOffset, "short " + names.requestLength, "byte[] " + names.output, "short " + names.outputOffset, "short " + names.outputCapacity}
+	workspaceParams := []string{"byte[] " + names.callerWorkspace, "short " + names.callerWorkspaceOffset, "short " + names.callerWorkspaceCapacity}
+	mr.AbstractParams = append(mr.AbstractParams, workspaceParams...)
+	mr.HandlerParams = append(mr.HandlerParams, workspaceParams...)
 	return mr, nil
 }
 
@@ -710,9 +722,10 @@ func renderMethod(name string, m *Method) (javaMethodRender, error) {
 // later field can collide with an earlier field's Offset/Length companion, and
 // suffixes themselves are valid IDL names. Each allocation is reserved in turn.
 type ordinaryJavaNames struct {
-	used                                                   map[string]bool
-	p1, p2, requestData, requestOffset, requestLength      string
-	output, outputOffset, outputCapacity, result, produced string
+	used                                                            map[string]bool
+	p1, p2, requestData, requestOffset, requestLength               string
+	output, outputOffset, outputCapacity, result, produced          string
+	callerWorkspace, callerWorkspaceOffset, callerWorkspaceCapacity string
 }
 
 func newOrdinaryJavaNames(msg *Message) *ordinaryJavaNames {
@@ -726,6 +739,7 @@ func newOrdinaryJavaNames(msg *Message) *ordinaryJavaNames {
 	n.requestData, n.requestOffset, n.requestLength = n.take("requestData"), n.take("requestOffset"), n.take("requestLength")
 	n.output, n.outputOffset, n.outputCapacity = n.take("output"), n.take("outputOffset"), n.take("outputCapacity")
 	n.result, n.produced = n.take("result"), n.take("produced")
+	n.callerWorkspace, n.callerWorkspaceOffset, n.callerWorkspaceCapacity = n.take("callerWorkspace"), n.take("callerWorkspaceOffset"), n.take("callerWorkspaceCapacity")
 	return n
 }
 
@@ -994,9 +1008,9 @@ func buildDispatchCasesBlock(methods []javaMethodRender) string {
 		}
 		fmt.Fprintf(&b, "            case %s:\n", method.INSConstName)
 		if method.HasHandler {
-			fmt.Fprintf(&b, "                return %s(p1, p2, requestData, requestOffset, requestLength, output, outputOffset, outputCapacity);\n", method.HandlerName)
+			fmt.Fprintf(&b, "                return %s(p1, p2, requestData, requestOffset, requestLength, output, outputOffset, outputCapacity, callerWorkspace, callerWorkspaceOffset, callerWorkspaceCapacity);\n", method.HandlerName)
 		} else {
-			fmt.Fprintf(&b, "                %s();\n", method.AbstractName)
+			fmt.Fprintf(&b, "                %s(callerWorkspace, callerWorkspaceOffset, callerWorkspaceCapacity);\n", method.AbstractName)
 			b.WriteString("                return (short) 0;\n")
 		}
 	}
