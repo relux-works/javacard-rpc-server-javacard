@@ -58,7 +58,7 @@ regression witnesses, one
 token-preserving mutant, one generation-time Go mutant, allocation payload and
 Classic 3.0.5u4 CAP conversion with off-card verification. The modes add their
 own jCardSim scenario with real ECDSA over chunked transcripts, ledger controls
-on refusal, chunked-success and producer-read paths, thirty-one behavioral
+on refusal, chunked-success and producer-read paths, forty-six behavioral
 narrowing mutants, one token-preserving mutant, two generation-time Go mutants,
 the allocation payload of the full Auth fixture and CAP conversion. Physical-card
 behavior, JCRE/native writes (including Signature and MessageDigest state) and

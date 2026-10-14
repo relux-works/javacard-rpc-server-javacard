@@ -47,6 +47,7 @@ public class Rev4ShapeHarness {
             if (only.equals("all") || only.equals("public")) publicStreams();
             if (only.equals("all") || only.equals("admission")) admissionStreams();
             if (only.equals("all") || only.equals("authority")) authority();
+            if (only.equals("all") || only.equals("bounds")) requestBounds();
             if (direct && (only.equals("all") || only.equals("spans"))) spanAdmission();
         }
         runtimeRefusals(session);
@@ -470,6 +471,22 @@ public class Rev4ShapeHarness {
         expect(0x6982, SIGN, 0, 2, Arrays.copyOf(transcript(194), 192), 0, "unauthenticated chunked write cancelled issuer upload");
         expect(0x6982, ADM + ABORT, 0, 0, EMPTY, 0, "unauthenticated abort cancelled issuer upload");
         expect(0x6982, PUT + CLOSE, 0, 0, close(leaf), 0, "unauthenticated issuer close");
+        // Every non-WRITE operation of a foreign method is refused the same way.
+        // After each refusal an identical issuer duplicate (0 B, 9000) proves the
+        // upload is still live; a fresh session would stage 192 B instead.
+        int[][] foreign = {{ENV, CLOSE, 0}, {SIGN, CLOSE, 0}, {ADM, CLOSE, 0}, {ENV, INFO, 0}, {ADM, INFO, 0},
+                {ENV, READ, 2}, {ADM, READ, 4}, {ENV, CLOSE_READ, 0}, {ADM, CLOSE_READ, 0}};
+        String[] foreignNames = {"foreign close", "chunked close", "admission close", "foreign info", "admission info",
+                "foreign read", "admission read", "foreign close read", "admission close read"};
+        for (int i = 0; i < foreign.length; i++) {
+            int op = foreign[i][1];
+            byte[] data = op == CLOSE || op == CLOSE_READ ? close(in) : EMPTY;
+            expect(0x6982, foreign[i][0] + op, 0, foreign[i][2], data, 0,
+                    "unauthenticated " + foreignNames[i] + " cancelled issuer upload");
+            auth(true);
+            expect(0x9000, PUT, 0, 2, a, 0, "unauthenticated " + foreignNames[i] + " left no live issuer upload");
+            auth(false);
+        }
         auth(true);
         expect(0x9000, PUT, 1, 2, b, 5, "issuer accepted last chunk");
         byte[] receipt = expect(0x9000, PUT + CLOSE, 0, 0, close(leaf), 36, "issuer close receipt");
@@ -490,6 +507,52 @@ public class Rev4ShapeHarness {
         expect(0x6985, PUT + CLOSE, 0, 0, close(leaf), 0, "authenticated foreign refusal wrote persistent");
         auth(false);
         expect(0x6A80, ENV, 1, 2, Arrays.copyOfRange(in, 192, 320), 0, "authenticated foreign refusal retained public handle");
+    }
+
+    // ----------------------------------------------------------- request bounds
+
+    // The declared request maximum bounds the running total, not only the packet
+    // count: 10 x 192 > 1792 (0x10), 11 x 192 > 2048 (0x20), 2 x 192 > 320 (0x70).
+    // An in-count upload whose last chunk takes the total one byte past the
+    // maximum, or a full chunk past it, is refused 6700 with 0 B before the
+    // handler, and the stream is dead; an upload at exactly the maximum is the
+    // accepted control.
+    static void requestBounds() throws Exception {
+        reset();
+        auth(false);
+        int[][] families = {{ENV, 1792}, {SIGN, 2048}, {ADM, 320}};
+        String[] names = {"public", "chunked", "admission"};
+        for (int f = 0; f < families.length; f++) {
+            int family = families[f][0], max = families[f][1], count = (max + 191) / 192;
+            String name = names[f];
+            for (int total : new int[] {max + 1, count * 192}) {
+                byte[] over = family == ENV ? chunk(total, 11) : transcript(total);
+                int calls = Rev4ShapeApplet.chunkCalls;
+                for (int i = 0; i < count - 1; i++) {
+                    expect(0x9000, family, i, count, part(over, i), family == ENV ? 192 : 0, name + " over-maximum control");
+                }
+                byte[] last = part(over, count - 1);
+                expect(0x6700, family, count - 1, count, last, 0, name + " request over maximum wrote persistent");
+                if (family != ENV && Rev4ShapeApplet.chunkCalls - calls != count - 1)
+                    throw new AssertionError(name + " request over maximum reached the handler [" + route + "]");
+                expect(0x6985, family + CLOSE, 0, 0, close(Arrays.copyOf(over, (count - 1) * 192)), 0,
+                        name + " request over maximum retained live handle");
+                expect(0x6A80, family, count - 1, count, last, 0, name + " request over maximum retry wrote persistent");
+            }
+            byte[] exact = family == ENV ? chunk(max, 11) : transcript(max);
+            for (int i = 0; i < count; i++) {
+                byte[] p = part(exact, i);
+                expect(0x9000, family, i, count, p, family == ENV ? p.length : 0, name + " request at maximum control");
+            }
+            byte[] closed = expect(0x9000, family + CLOSE, 0, 0, close(exact), 0, name + " request at maximum close wrote persistent");
+            if (family == SIGN) {
+                verify(closed, exact, "chunked request at maximum signature");
+            } else {
+                int total = family == ENV ? max : 73 + Rev4ShapeApplet.certLength;
+                checkDescriptor(closed, total, (total + 191) / 192, name + " request at maximum descriptor");
+                expect(0x9000, family + ABORT, 0, 0, EMPTY, 0, name + " request at maximum abort");
+            }
+        }
     }
 
     // -------------------------------------------------------------- admission
@@ -513,6 +576,16 @@ public class Rev4ShapeHarness {
         Rev4ShapeApplet.output = 0;
         if (Rev4ShapeApplet.finishCalls != finishes) throw new AssertionError("persistent response admitted on chunked close: handler ran");
         expect(0x6985, SIGN + CLOSE, 0, 0, close(t), 0, "chunked admission refusal retained live handle");
+        // The caller-workspace half of the same CLOSE admission: the handler
+        // scratch passed to Finish must be RAM as well.
+        sendChunks(t, "chunked close workspace control");
+        finishes = Rev4ShapeApplet.finishCalls;
+        Rev4ShapeApplet.output = 2;
+        expect(0x6985, SIGN + CLOSE, 0, 0, close(t), 0, "persistent caller workspace admitted on chunked close");
+        Rev4ShapeApplet.output = 0;
+        if (Rev4ShapeApplet.finishCalls != finishes) throw new AssertionError("persistent caller workspace admitted on chunked close: handler ran");
+        expect(0x6985, SIGN + CLOSE, 0, 0, close(t), 0, "chunked close workspace refusal retained live handle");
+        signSession(t, "RAM caller workspace chunked close control");
         sendChunks(t, "transient chunked response control");
         Rev4ShapeApplet.output = 3;
         verify(expect(0x9000, SIGN + CLOSE, 0, 0, close(t), 0, "transient chunked response wrote persistent"), t,
@@ -538,6 +611,17 @@ public class Rev4ShapeHarness {
         Rev4ShapeApplet.output = 0;
         if (Rev4ShapeApplet.produceCalls != produced) throw new AssertionError("persistent read span admitted: handler ran");
         expect(0x6985, ENV + READ, 0, packets, EMPTY, 0, "persistent read refusal retained live handle");
+        // The caller-workspace half of READ admission: the producer scratch must be RAM.
+        publicClosed(in, "public read workspace control");
+        produced = Rev4ShapeApplet.produceCalls;
+        Rev4ShapeApplet.output = 2;
+        expect(0x6985, ENV + READ, 0, packets, EMPTY, 0, "persistent caller workspace admitted on public read");
+        Rev4ShapeApplet.output = 0;
+        if (Rev4ShapeApplet.produceCalls != produced) throw new AssertionError("persistent caller workspace admitted on public read: handler ran");
+        expect(0x6985, ENV + READ, 0, packets, EMPTY, 0, "public read workspace refusal retained live handle");
+        byte[] ramRead = publicClosed(in, "RAM caller workspace public read control");
+        checkResult(ramRead, readAll(ENV, packets, "RAM caller workspace public read wrote persistent"), "RAM caller workspace public read");
+        expect(0x9000, ENV + ABORT, 0, 0, EMPTY, 0, "RAM caller workspace public read abort");
         publicClosed(in, "persistent descriptor span control");
         Rev4ShapeApplet.output = 1;
         expect(0x6985, ENV + INFO, 0, 0, EMPTY, 0, "persistent descriptor span admitted");
@@ -561,6 +645,26 @@ public class Rev4ShapeHarness {
         Rev4ShapeApplet.output = 0;
         if (Rev4ShapeApplet.produceCalls != producedAdm) throw new AssertionError("persistent read span admitted on admission: handler ran");
         expect(0x6985, ADM + READ, 1, admPackets, EMPTY, 0, "admission read refusal retained live handle");
+        // Caller-workspace half at the admission CLOSE (Prepare) and READ (Produce).
+        admissionUpload(adm, "admission close workspace control");
+        preparedAdm = Rev4ShapeApplet.prepareCalls;
+        Rev4ShapeApplet.output = 2;
+        expect(0x6985, ADM + CLOSE, 0, 0, close(adm), 0, "persistent caller workspace admitted on admission close");
+        Rev4ShapeApplet.output = 0;
+        if (Rev4ShapeApplet.prepareCalls != preparedAdm) throw new AssertionError("persistent caller workspace admitted on admission close: handler ran");
+        expect(0x6985, ADM + CLOSE, 0, 0, close(adm), 0, "admission close workspace refusal retained live handle");
+        admissionUpload(adm, "admission read workspace control");
+        expect(0x9000, ADM + CLOSE, 0, 0, close(adm), 0, "admission read workspace close");
+        producedAdm = Rev4ShapeApplet.produceCalls;
+        Rev4ShapeApplet.output = 2;
+        expect(0x6985, ADM + READ, 0, admPackets, EMPTY, 0, "persistent caller workspace admitted on admission read");
+        Rev4ShapeApplet.output = 0;
+        if (Rev4ShapeApplet.produceCalls != producedAdm) throw new AssertionError("persistent caller workspace admitted on admission read: handler ran");
+        expect(0x6985, ADM + READ, 0, admPackets, EMPTY, 0, "admission read workspace refusal retained live handle");
+        admissionUpload(adm, "RAM caller workspace admission read control");
+        expect(0x9000, ADM + CLOSE, 0, 0, close(adm), 0, "RAM caller workspace admission close wrote persistent");
+        checkAdmission(adm, readAll(ADM, admPackets, "RAM caller workspace admission read wrote persistent"), "RAM caller workspace admission result");
+        expect(0x9000, ADM + ABORT, 0, 0, EMPTY, 0, "RAM caller workspace admission abort");
         // Transient response span: the whole admission flow is accepted.
         Rev4ShapeApplet.output = 3;
         admissionUpload(adm, "transient admission response control");

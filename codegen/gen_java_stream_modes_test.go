@@ -320,6 +320,22 @@ func TestStreamModesLedgerControls(t *testing.T) {
 func TestStreamModesNarrowingMutants(t *testing.T) {
 	jar := simulatorJar(t)
 	const gate = "        if (!authenticated && (methodMode == MODE_AUTHENTICATED ||\n                (scalars[IDX_STATE] == STATE_WRITING &&\n"
+	const liveUpload = "                (scalars[IDX_STATE] == STATE_WRITING &&\n                        scalars[IDX_METHOD_MODE] == MODE_AUTHENTICATED))) {"
+	const bound = "        if ((scalars[IDX_INPUT_LENGTH] & 0xFFFF) + length >\n                (scalars[IDX_REQUEST_MAX_LENGTH] & 0xFFFF)) {"
+	const closeAdmission = "        requireCloseData(requestLength);\n        requireNonPersistentOutput(response, callerWorkspace);"
+	const readAdmission = "        // Produce the chunk again into the admitted RAM span; it is never stored.\n        requireNonPersistentOutput(response, callerWorkspace);"
+	// workspaceSkipped keeps the response-span half of an output admission and
+	// drops only its caller-workspace half when cond holds.
+	workspaceSkipped := func(anchor, cond string) string {
+		head := strings.TrimSuffix(anchor, "        requireNonPersistentOutput(response, callerWorkspace);")
+		return head + "        if (" + cond + ") {\n            requireRamSpan(response);\n        } else {\n            requireNonPersistentOutput(response, callerWorkspace);\n        }"
+	}
+	liveUploadFor := func(cond string) string {
+		return "                (" + cond + " && scalars[IDX_STATE] == STATE_WRITING &&\n                        scalars[IDX_METHOD_MODE] == MODE_AUTHENTICATED))) {"
+	}
+	boundUnless := func(cond string) string {
+		return "        if (" + cond + " && (scalars[IDX_INPUT_LENGTH] & 0xFFFF) + length >\n                (scalars[IDX_REQUEST_MAX_LENGTH] & 0xFFFF)) {"
+	}
 	for _, tc := range []struct {
 		name      string
 		edits     [][2]string
@@ -329,6 +345,23 @@ func TestStreamModesNarrowingMutants(t *testing.T) {
 		{"gate-admits-issuer-first-chunk", [][2]string{{gate, "        if (!authenticated && !(methodMode == MODE_AUTHENTICATED && operation == OP_WRITE_OR_INVOKE && p1 == 0 && scalars[IDX_STATE] == STATE_EMPTY) && (methodMode == MODE_AUTHENTICATED ||\n                (scalars[IDX_STATE] == STATE_WRITING &&\n"}}, "pre-auth put staged"},
 		{"gate-unprotects-issuer-on-abort", [][2]string{{gate, "        if (!authenticated && (methodMode == MODE_AUTHENTICATED ||\n                (operation != OP_ABORT && scalars[IDX_STATE] == STATE_WRITING &&\n"}}, "unauthenticated abort cancelled issuer upload"},
 		{"gate-unprotects-issuer-from-chunked", [][2]string{{gate, "        if (!authenticated && (methodMode == MODE_AUTHENTICATED ||\n                (methodMode != MODE_CHUNKED && scalars[IDX_STATE] == STATE_WRITING &&\n"}}, "unauthenticated chunked write cancelled issuer upload"},
+		{"gate-protects-only-write-abort", [][2]string{{liveUpload, liveUploadFor("(operation == OP_WRITE_OR_INVOKE || operation == OP_ABORT)")}}, "unauthenticated foreign close cancelled issuer upload"},
+		{"gate-skips-close-write", [][2]string{{liveUpload, liveUploadFor("operation != OP_CLOSE_WRITE")}}, "unauthenticated foreign close cancelled issuer upload"},
+		{"gate-skips-pending-info", [][2]string{{liveUpload, liveUploadFor("operation != OP_GET_PENDING_READ_INFO")}}, "unauthenticated foreign info cancelled issuer upload"},
+		{"gate-skips-read-chunk", [][2]string{{liveUpload, liveUploadFor("operation != OP_READ_CHUNK")}}, "unauthenticated foreign read cancelled issuer upload"},
+		{"gate-skips-close-read", [][2]string{{liveUpload, liveUploadFor("operation != OP_CLOSE_READ")}}, "unauthenticated foreign close read cancelled issuer upload"},
+		// Request total bound.
+		{"bound-skipped-for-public", [][2]string{{bound, boundUnless("scalars[IDX_METHOD_MODE] != MODE_PUBLIC_INVALIDATE")}}, "public request over maximum wrote persistent"},
+		{"bound-skipped-for-chunked", [][2]string{{bound, boundUnless("scalars[IDX_METHOD_MODE] != MODE_CHUNKED")}}, "chunked request over maximum wrote persistent"},
+		{"bound-skipped-for-admission", [][2]string{{bound, boundUnless("scalars[IDX_ACTIVE_METHOD] != 4")}}, "admission request over maximum wrote persistent"},
+		{"bound-admits-max-plus-one", [][2]string{{bound, "        if ((scalars[IDX_INPUT_LENGTH] & 0xFFFF) + length >\n                (scalars[IDX_REQUEST_MAX_LENGTH] & 0xFFFF) + 1) {"}}, "public request over maximum wrote persistent"},
+		{"bound-plus-128", [][2]string{{bound, "        if ((scalars[IDX_INPUT_LENGTH] & 0xFFFF) + length >\n                (scalars[IDX_REQUEST_MAX_LENGTH] & 0xFFFF) + 128) {"}}, "public request over maximum wrote persistent"},
+		// Caller-workspace half of output admission.
+		{"chunked-close-skips-workspace-admission", [][2]string{{closeAdmission, workspaceSkipped(closeAdmission, "scalars[IDX_METHOD_MODE] == MODE_CHUNKED")}}, "persistent caller workspace admitted on chunked close"},
+		{"admission-close-skips-workspace-admission", [][2]string{{closeAdmission, workspaceSkipped(closeAdmission, "scalars[IDX_ACTIVE_METHOD] == 4")}}, "persistent caller workspace admitted on admission close"},
+		{"public-close-skips-workspace-admission", [][2]string{{closeAdmission, workspaceSkipped(closeAdmission, "scalars[IDX_METHOD_MODE] == MODE_PUBLIC_INVALIDATE")}}, "persistent caller workspace admitted on public close"},
+		{"admission-read-skips-workspace-admission", [][2]string{{readAdmission, workspaceSkipped(readAdmission, "scalars[IDX_METHOD_MODE] == MODE_CHUNKED")}}, "persistent caller workspace admitted on admission read"},
+		{"public-read-skips-workspace-admission", [][2]string{{readAdmission, workspaceSkipped(readAdmission, "scalars[IDX_METHOD_MODE] == MODE_PUBLIC_INVALIDATE")}}, "persistent caller workspace admitted on public read"},
 		// Chunked delivery.
 		{"chunked-stages-sign-chunk", [][2]string{{"            requireRamSpan(callerWorkspace);\n            sha256.updateDigest(", "            if (scalars[IDX_ACTIVE_METHOD] == 2) {\n                copy(request, requestOffset, workspace, scalars[IDX_INPUT_LENGTH], requestLength);\n            }\n            requireRamSpan(callerWorkspace);\n            sha256.updateDigest("}}, "chunked first chunk wrote persistent"},
 		{"chunked-duplicate-admits-first-packet", [][2]string{{"            if (scalars[IDX_METHOD_MODE] == MODE_CHUNKED) {\n                // Nothing was staged", "            if (scalars[IDX_METHOD_MODE] == MODE_CHUNKED && index == 0) {\n                return (short) 0;\n            }\n            if (scalars[IDX_METHOD_MODE] == MODE_CHUNKED) {\n                // Nothing was staged"}}, "chunked changed duplicate wrote persistent"},

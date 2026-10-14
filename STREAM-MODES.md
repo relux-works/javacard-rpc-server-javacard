@@ -221,7 +221,10 @@ payload, not a card total.
   a refusal path, directly and through an alias, on the accepted chunked path
   and on an accepted producer read is caught by name; a transient plant stays
   green);
-- `TestStreamModesNarrowingMutants` (31 behavioral mutants, each keeping its
-  guard and admitting one member of the refused class);
+- `TestStreamModesNarrowingMutants` (46 behavioral mutants, each keeping its
+  guard and admitting one member of the refused class, among them the request
+  total bound per mode, every non-WRITE operation of a foreign method during a
+  live issuer upload, and the caller-workspace half of CLOSE and READ output
+  admission);
 - `TestStreamModesAllocationPayload` and `TestStreamModesClassicCAP` (Classic
   3.0.5u4 conversion with a fixture using every callback and `Signature.update`).
