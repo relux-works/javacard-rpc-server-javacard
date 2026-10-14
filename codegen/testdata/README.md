@@ -48,3 +48,10 @@ Its host-only subclass retains expected test references deliberately; generated
 classes and the CAP logic do not. `CallerWorkspaceApplet.java` and
 `CallerWorkspaceAPDUHarness.java` drive the actual simulator process/send path.
 See [the API and evidence limits](../../CALLER-WORKSPACE.md).
+
+`Rev4ShapeApplet.java` and `Rev4ShapeHarness.java` drive the per-method stream
+modes on jCardSim: a chunked ECDSA signature over an incrementally parsed
+transcript, an authenticated issuer upload and two public streamed results
+produced into RAM. The applet reports every array store to its ledger.
+`Rev4ShapeCAPApplet.java` is the converter fixture for the same generated
+package. See `STREAM-MODES.md`.

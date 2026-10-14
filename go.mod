@@ -2,4 +2,4 @@ module github.com/relux-works/javacard-rpc-server-javacard
 
 go 1.25
 
-require github.com/relux-works/javacard-rpc/pluginapi v0.1.1
+require github.com/relux-works/javacard-rpc/pluginapi v0.1.2-0.20261014214040-2d009196fe38

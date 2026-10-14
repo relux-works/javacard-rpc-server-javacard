@@ -82,6 +82,12 @@ persistent writes on a refused APDU. No transient window large enough for a
 streamed result exists within a Java Card RAM budget, so the mode does not
 offer one. `begin` repeats the refusal at runtime for a direct dispatch call.
 
+The exception is a method with `stream_mode = "public-invalidate"`: its result
+is never stored or held whole. The handler produces it chunk by chunk into the
+admitted RAM response span, for the digest at CLOSE_WRITE and again on every
+READ_CHUNK. See [per-method stream modes](STREAM-MODES.md), which also covers
+the zero-NVM `chunked` mode.
+
 ## Retained data
 
 After an accepted session the workspace keeps the request bytes and the short

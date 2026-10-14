@@ -412,7 +412,11 @@ type javaTemplateData struct {
 	// workspace only for authenticated APDUs, transient-only refusal invalidation
 	// and short handler output staged in the caller response span.
 	StreamAuthenticated bool
-	StreamCLAMatch      string
+	// StreamMixed extends the authenticated runtime with per-method modes:
+	// public-invalidate staging with a RAM-only streamed result producer and
+	// zero-NVM chunked delivery. False keeps the authenticated output unchanged.
+	StreamMixed    bool
+	StreamCLAMatch string
 }
 
 // StreamMemory selects the transient memory the generated stream state lives in.
@@ -466,6 +470,8 @@ type javaMethodRender struct {
 	RequestStream            *Field
 	ResponseStream           *Field
 	ExactShortResponseLength int
+	// StreamMode is the per-method stream contract; empty keeps the applet policy.
+	StreamMode string
 }
 
 type requestHandling struct {
@@ -524,6 +530,9 @@ func GenerateJavaSkeletonWithOptions(s *Schema, packageName string, options Java
 	if err != nil {
 		return nil, err
 	}
+	if err := validateStreamModes(s, methods); err != nil {
+		return nil, err
+	}
 	if s.Applet.StreamWorkspaceCleanup == StreamWorkspaceCleanupAuthenticatedInvalidate {
 		if err := requireAuthenticatedInvalidateMethods(methods); err != nil {
 			return nil, err
@@ -551,6 +560,7 @@ func GenerateJavaSkeletonWithOptions(s *Schema, packageName string, options Java
 		StreamWorkspacePersistent: s.Applet.StreamWorkspace == "persistent",
 		StreamCleanupTracked:      s.Applet.StreamWorkspaceCleanup == pluginapi.StreamWorkspaceCleanupWholeReplyArea,
 		StreamAuthenticated:       s.Applet.StreamWorkspaceCleanup == StreamWorkspaceCleanupAuthenticatedInvalidate,
+		StreamMixed:               hasJavaStreamModes(methods),
 		StreamCLAMatch:            javaStreamCLAMatch(s.Applet.CLA),
 
 		StreamDigestExternalAccess: streamDigestExternalAccess,
@@ -648,6 +658,7 @@ func renderMethod(name string, m *Method) (javaMethodRender, error) {
 		HandlerName:  "handle" + toPascal(name),
 		AbstractName: "on" + toPascal(name),
 		Signature:    methodSignature(name, m),
+		StreamMode:   m.StreamMode,
 	}
 	if m.HasStream() {
 		mr.IsStream = true

@@ -27,6 +27,15 @@ public interface {{.StreamEndpointName}} {
     byte ABORT_DESELECT     = (byte) 0x02;
     byte ABORT_RESET        = (byte) 0x03;
     byte ABORT_HOST_FAILURE = (byte) 0x04;
+{{- if .StreamMixed}}
+
+    /** Persistent staging; only an APDU the applet marks authenticated reaches it. */
+    byte MODE_AUTHENTICATED     = (byte) 0x00;
+    /** Persistent staging of accepted public chunks; a streamed result stays in RAM. */
+    byte MODE_PUBLIC_INVALIDATE = (byte) 0x01;
+    /** Chunks reach the handler as they arrive; nothing persistent is written. */
+    byte MODE_CHUNKED           = (byte) 0x02;
+{{- end}}
 
     /**
      * Return the response length. Protocol failures use the runtime's one
@@ -39,10 +48,16 @@ public interface {{.StreamEndpointName}} {
      * unauthenticated APDU is refused with 6982 before any session or
      * persistent effect; persistent workspace is reachable only when it is true.
 {{- end}}
+{{- if .StreamMixed}}
+     * methodMode is the method's generated MODE_* value. Authentication is
+     * required only for MODE_AUTHENTICATED, and an unauthenticated APDU never
+     * changes a live authenticated upload.
+{{- end}}
      */
     short dispatch(
             byte methodId,
-            byte operation,
+            byte operation,{{if .StreamMixed}}
+            byte methodMode,{{end}}
             boolean hasRequestStream,
             short requestMaxLength,
             short requestChunkSize,
@@ -93,6 +108,74 @@ public interface {{.StreamEndpointName}} {
                 byte[] callerWorkspace,
                 short callerWorkspaceOffset,
                 short callerWorkspaceCapacity);
+{{- if .StreamMixed}}
+
+        /**
+         * MODE_CHUNKED: one accepted request chunk, delivered once and in order,
+         * read-only from the caller's request span. Nothing is staged, so keep
+         * only small parser or digest state in RAM; packetIndex 0 starts a new
+         * request. Scratch goes to the admitted RAM caller workspace only.
+         */
+        void acceptChunk(
+                byte methodId,
+                short packetIndex,
+                short packetCount,
+                byte[] chunk,
+                short chunkOffset,
+                short chunkLength,
+                byte[] callerWorkspace,
+                short callerWorkspaceOffset,
+                short callerWorkspaceCapacity);
+
+        /**
+         * MODE_CHUNKED: every chunk was delivered and the request digest
+         * matched. Write the short result into the admitted RAM output span and
+         * return its length under the same rules as execute.
+         */
+        short finishChunks(
+                byte methodId,
+                short inputLength,
+                byte[] output,
+                short outputOffset,
+                short outputCapacity,
+                byte[] callerWorkspace,
+                short callerWorkspaceOffset,
+                short callerWorkspaceCapacity);
+
+        /**
+         * MODE_PUBLIC_INVALIDATE streamed result: prepare it from the accepted
+         * input and return its total length, 1..the declared maximum. Keep any
+         * state the result needs in RAM; input is read-only.
+         */
+        short prepareResult(
+                byte methodId,
+                byte[] input,
+                short inputOffset,
+                short inputLength,
+                byte[] callerWorkspace,
+                short callerWorkspaceOffset,
+                short callerWorkspaceCapacity);
+
+        /**
+         * MODE_PUBLIC_INVALIDATE streamed result: write result bytes
+         * [resultOffset, resultOffset + length) into the admitted RAM output span.
+         * Called once per chunk while CLOSE_WRITE computes the result digest and
+         * again for every READ_CHUNK, so the bytes must be identical every time
+         * within one prepared session; the host checks them against the digest.
+         */
+        void produceResult(
+                byte methodId,
+                byte[] input,
+                short inputOffset,
+                short inputLength,
+                short resultOffset,
+                byte[] output,
+                short outputOffset,
+                short length,
+                byte[] callerWorkspace,
+                short callerWorkspaceOffset,
+                short callerWorkspaceCapacity);
+{{- end}}
     }
 
     interface Sha256 {
@@ -102,6 +185,16 @@ public interface {{.StreamEndpointName}} {
                 short inputLength,
                 byte[] output,
                 short outputOffset);
+{{- if .StreamMixed}}
+
+        /** Start a running digest; digest() then finishes it. */
+        void resetDigest();
+
+        void updateDigest(
+                byte[] input,
+                short inputOffset,
+                short inputLength);
+{{- end}}
     }
 
     /** One exception object is allocated once; its status is transient RAM. */
@@ -142,6 +235,19 @@ const javaStreamRuntimeTemplate = `package {{.PackageName}};
  * Refusal, abort, deselect, CLOSE and reset invalidate the transient session
  * only. Retained workspace bytes are public data from earlier accepted APDUs;
  * they are not erased, and no live state addresses them after invalidation.
+{{- if .StreamMixed}}
+ *
+ * Per-method modes. MODE_AUTHENTICATED is the contract above.
+ * MODE_PUBLIC_INVALIDATE stages accepted chunks without authentication under
+ * the same refusal rules; its streamed result is never stored: the handler
+ * prepares it at CLOSE_WRITE and produces each chunk into the admitted RAM
+ * response span, once for the result digest and again on every READ_CHUNK.
+ * MODE_CHUNKED stages nothing: each accepted chunk goes from the caller's
+ * request span to the handler and a running digest, so no APDU of that method,
+ * accepted or refused, writes persistent memory. A repeated chunk cannot be
+ * compared with a staged copy and is refused; no receipt is kept for a CLOSE
+ * retry. An unauthenticated APDU never changes a live authenticated upload.
+{{- end}}
  * Command processing reuses one exception and allocates no object or array.
 {{else if .StreamWorkspacePersistent}} * Only the bulk workspace is persistent. Scalar state, handler reference,
  * digest scratch and reset detection remain transient. Reset invalidates the
@@ -201,6 +307,8 @@ public final class {{.StreamRuntimeName}} implements {{.StreamEndpointName}} {
     /** Required length of the injected scalar array. */
 {{if .StreamCleanupTracked}}    private static final short IDX_DIRTY_END = (short) 17;
     public static final short SCALAR_COUNT = (short) 18;
+{{else if .StreamMixed}}    private static final short IDX_METHOD_MODE = (short) 17;
+    public static final short SCALAR_COUNT = (short) 18;
 {{else}}    public static final short SCALAR_COUNT = (short) 17;
 {{end}}    /** Required length of the injected handler reference array. */
     public static final short HANDLER_SLOT_COUNT = (short) 1;
@@ -244,7 +352,8 @@ public final class {{.StreamRuntimeName}} implements {{.StreamEndpointName}} {
     @Override
     public short dispatch(
             byte methodId,
-            byte operation,
+            byte operation,{{if .StreamMixed}}
+            byte methodMode,{{end}}
             boolean requestEnabled,
             short requestLimit,
             short requestChunk,
@@ -265,7 +374,16 @@ public final class {{.StreamRuntimeName}} implements {{.StreamEndpointName}} {
             short callerWorkspaceOffset,
             short callerWorkspaceCapacity{{if .StreamAuthenticated}},
             boolean authenticated{{end}}) {
-{{- if .StreamAuthenticated}}
+{{- if .StreamMixed}}
+        // An authenticated method stages nothing before authentication, and an
+        // unauthenticated APDU of any method cannot cancel or join a live
+        // authenticated upload: refuse before any session or persistent effect.
+        if (!authenticated && (methodMode == MODE_AUTHENTICATED ||
+                (scalars[IDX_STATE] == STATE_WRITING &&
+                        scalars[IDX_METHOD_MODE] == MODE_AUTHENTICATED))) {
+            rejectWithoutClearing(SW_SECURITY_STATUS_NOT_SATISFIED);
+        }
+{{- else if .StreamAuthenticated}}
         // Before authentication no stream byte may be staged in the persistent
         // workspace: refuse before any session read, transient change or NVM store.
         if (!authenticated) {
@@ -302,7 +420,7 @@ public final class {{.StreamRuntimeName}} implements {{.StreamEndpointName}} {
                     clearAll();
                 }
                 if (scalars[IDX_STATE] == STATE_EMPTY) {
-                    begin(methodId, requestEnabled, requestLimit, requestChunk,
+                    begin(methodId, {{if .StreamMixed}}methodMode, {{end}}requestEnabled, requestLimit, requestChunk,
                             responseEnabled, responseLimit, responseChunk,
                             shortResponseLength, handler);
                 } else if (scalars[IDX_ACTIVE_METHOD] != methodId) {
@@ -327,10 +445,15 @@ public final class {{.StreamRuntimeName}} implements {{.StreamEndpointName}} {
                             callerWorkspace, callerWorkspaceOffset, callerWorkspaceCapacity);
                 case OP_GET_PENDING_READ_INFO:
                     requireEmptyCommand(p1, p2, requestLength);
+{{- if .StreamMixed}}
+                    // The descriptor is output: only an admitted RAM span receives it.
+                    requireRamSpan(responseBuffer);
+{{- end}}
                     return pendingInfo(responseBuffer, responseOffset, responseCapacity);
                 case OP_READ_CHUNK:
                     requireEmptyData(requestLength);
-                    return readChunk(p1, p2, responseBuffer, responseOffset, responseCapacity);
+                    return readChunk(p1, p2, responseBuffer, responseOffset, responseCapacity{{if .StreamMixed}},
+                            callerWorkspace, callerWorkspaceOffset, callerWorkspaceCapacity{{end}});
                 case OP_CLOSE_READ:
                     return closeRead(p1, p2, requestBuffer, requestOffset, requestLength);
                 default:
@@ -366,7 +489,8 @@ public final class {{.StreamRuntimeName}} implements {{.StreamEndpointName}} {
     }
 
     private void begin(
-            byte methodId,
+            byte methodId,{{if .StreamMixed}}
+            byte methodMode,{{end}}
             boolean requestEnabled,
             short requestLimit,
             short requestChunk,
@@ -376,7 +500,7 @@ public final class {{.StreamRuntimeName}} implements {{.StreamEndpointName}} {
             short shortResponseLength,
             Handler handler) {
         short required = requestEnabled ? requestLimit : (short) 0;
-        if (responseEnabled && responseLimit > required) {
+        if ({{if .StreamMixed}}methodMode != MODE_PUBLIC_INVALIDATE && {{end}}responseEnabled && responseLimit > required) {
             required = responseLimit;
         }
         short shortCapacity = shortResponseLength >= 0 ?
@@ -384,6 +508,12 @@ public final class {{.StreamRuntimeName}} implements {{.StreamEndpointName}} {
         if (!responseEnabled && required < shortCapacity) {
             required = shortCapacity;
         }
+{{- if .StreamMixed}}
+        if (methodMode == MODE_CHUNKED) {
+            // Nothing is staged: the session never addresses the workspace.
+            required = (short) 0;
+        }
+{{- end}}
         if ((!requestEnabled && !responseEnabled) || handler == null ||
                 (requestEnabled && (requestLimit <= 0 || requestChunk <= 0)) ||
                 (responseEnabled && (responseLimit <= 0 || responseChunk <= 0)) ||
@@ -391,7 +521,13 @@ public final class {{.StreamRuntimeName}} implements {{.StreamEndpointName}} {
                 (!responseEnabled &&
                         (shortResponseLength < (short) -1 ||
                                 shortResponseLength > SHORT_RESPONSE_CAPACITY)) ||
-                required > workspace.length{{if .StreamAuthenticated}} ||
+                required > workspace.length{{if .StreamMixed}} ||
+                // Every mode needs a request stream. Only a public method may
+                // stream its result, and only through the RAM producer.
+                !requestEnabled ||
+                (responseEnabled && methodMode != MODE_PUBLIC_INVALIDATE) ||
+                (methodMode != MODE_AUTHENTICATED && methodMode != MODE_PUBLIC_INVALIDATE &&
+                        methodMode != MODE_CHUNKED){{else if .StreamAuthenticated}} ||
                 // A streamed result would be produced into the persistent
                 // workspace on an APDU that may still be refused.
                 responseEnabled || !requestEnabled{{end}}) {
@@ -406,6 +542,9 @@ public final class {{.StreamRuntimeName}} implements {{.StreamEndpointName}} {
         scalars[IDX_RESPONSE_MAX_LENGTH] = responseLimit;
         scalars[IDX_RESPONSE_CHUNK_SIZE] = responseChunk;
         scalars[IDX_EXACT_SHORT_RESPONSE_LENGTH] = shortResponseLength;
+{{- if .StreamMixed}}
+        scalars[IDX_METHOD_MODE] = methodMode;
+{{- end}}
         handlerSlot[IDX_HANDLER] = handler;
     }
 
@@ -444,6 +583,13 @@ public final class {{.StreamRuntimeName}} implements {{.StreamEndpointName}} {
 
         if (scalars[IDX_STATE] == STATE_WRITING &&
                 index == ((scalars[IDX_NEXT_PACKET_INDEX] & 0xFF) - 1)) {
+{{- if .StreamMixed}}
+            if (scalars[IDX_METHOD_MODE] == MODE_CHUNKED) {
+                // Nothing was staged, so a repeated chunk cannot be proven
+                // identical to the one the handler already consumed.
+                fail(SW_INVALID_DATA);
+            }
+{{- end}}
             if (count != (scalars[IDX_PACKET_COUNT] & 0xFF) ||
                     length != (scalars[IDX_LAST_CHUNK_LENGTH] & 0xFFFF) ||
                     !equalsRange(workspace, scalars[IDX_LAST_CHUNK_OFFSET],
@@ -457,6 +603,11 @@ public final class {{.StreamRuntimeName}} implements {{.StreamEndpointName}} {
             scalars[IDX_STATE] = STATE_WRITING;
             scalars[IDX_PACKET_COUNT] = p2;
             scalars[IDX_NEXT_PACKET_INDEX] = (short) 0;
+{{- if .StreamMixed}}
+            if (scalars[IDX_METHOD_MODE] == MODE_CHUNKED) {
+                sha256.resetDigest();
+            }
+{{- end}}
         }
         if (scalars[IDX_STATE] != STATE_WRITING ||
                 count != (scalars[IDX_PACKET_COUNT] & 0xFF) ||
@@ -467,6 +618,21 @@ public final class {{.StreamRuntimeName}} implements {{.StreamEndpointName}} {
                 (scalars[IDX_REQUEST_MAX_LENGTH] & 0xFFFF)) {
             fail(SW_WRONG_LENGTH);
         }
+{{- if .StreamMixed}}
+        if (scalars[IDX_METHOD_MODE] == MODE_CHUNKED) {
+            // The chunk goes from the caller's request span to the running digest
+            // and the handler; the persistent workspace is never addressed.
+            requireRamSpan(callerWorkspace);
+            sha256.updateDigest(request, requestOffset, requestLength);
+            ((Handler) handlerSlot[IDX_HANDLER]).acceptChunk(
+                    (byte) scalars[IDX_ACTIVE_METHOD], (short) index, (short) count,
+                    request, requestOffset, requestLength,
+                    callerWorkspace, callerWorkspaceOffset, callerWorkspaceCapacity);
+            scalars[IDX_INPUT_LENGTH] = (short) ((scalars[IDX_INPUT_LENGTH] & 0xFFFF) + length);
+            scalars[IDX_NEXT_PACKET_INDEX] = (short) (index + 1);
+            return (short) 0;
+        }
+{{- end}}
 
         scalars[IDX_LAST_CHUNK_OFFSET] = scalars[IDX_INPUT_LENGTH];
         scalars[IDX_LAST_CHUNK_LENGTH] = requestLength;
@@ -513,16 +679,110 @@ public final class {{.StreamRuntimeName}} implements {{.StreamEndpointName}} {
         if (declaredLength != (scalars[IDX_INPUT_LENGTH] & 0xFFFF)) {
             fail(SW_WRONG_LENGTH);
         }
+{{- if .StreamMixed}}
+        if (scalars[IDX_METHOD_MODE] == MODE_CHUNKED) {
+            return finishChunks(request, digestOffset, response, responseOffset, responseCapacity,
+                    callerWorkspace, callerWorkspaceOffset, callerWorkspaceCapacity);
+        }
+{{- end}}
 
         preflightHandlerResponse(responseCapacity);
+{{- if .StreamMixed}}
+        // The engine is shared with running digests; never inherit their state.
+        sha256.resetDigest();
+{{- end}}
         sha256.digest(workspace, (short) 0, scalars[IDX_INPUT_LENGTH], digestScratch, (short) 0);
         if (!equalsRange(digestScratch, (short) 0, request, digestOffset, DIGEST_LENGTH)) {
             fail(SW_INVALID_DATA);
         }
+{{- if .StreamMixed}}
+        if (hasResponseStream()) {
+            return prepareStreamedResult(response, responseOffset, responseCapacity,
+                    callerWorkspace, callerWorkspaceOffset, callerWorkspaceCapacity);
+        }
+{{- end}}
         return executeOnce(workspace, (short) 0, scalars[IDX_INPUT_LENGTH],
                 response, responseOffset, responseCapacity, true,
                 callerWorkspace, callerWorkspaceOffset, callerWorkspaceCapacity);
     }
+{{- if .StreamMixed}}
+
+    /**
+     * MODE_CHUNKED CLOSE_WRITE: finish the running digest over the delivered
+     * chunks, then let the handler write its short result into the admitted RAM
+     * response span. No receipt is kept, so a CLOSE retry is refused.
+     */
+    private short finishChunks(
+            byte[] request,
+            short digestOffset,
+            byte[] response,
+            short responseOffset,
+            short responseCapacity,
+            byte[] callerWorkspace,
+            short callerWorkspaceOffset,
+            short callerWorkspaceCapacity) {
+        preflightHandlerResponse(responseCapacity);
+        sha256.digest(request, digestOffset, (short) 0, digestScratch, (short) 0);
+        if (!equalsRange(digestScratch, (short) 0, request, digestOffset, DIGEST_LENGTH)) {
+            fail(SW_INVALID_DATA);
+        }
+        short outputCapacity = shortOutputCapacity();
+        short produced = ((Handler) handlerSlot[IDX_HANDLER]).finishChunks(
+                (byte) scalars[IDX_ACTIVE_METHOD], scalars[IDX_INPUT_LENGTH],
+                response, responseOffset, outputCapacity,
+                callerWorkspace, callerWorkspaceOffset, callerWorkspaceCapacity);
+        if (produced < 0 || produced > outputCapacity ||
+                (scalars[IDX_EXACT_SHORT_RESPONSE_LENGTH] >= 0 &&
+                        produced != scalars[IDX_EXACT_SHORT_RESPONSE_LENGTH])) {
+            fail(SW_WRONG_LENGTH);
+        }
+        clearAll();
+        return produced;
+    }
+
+    /**
+     * MODE_PUBLIC_INVALIDATE CLOSE_WRITE with a streamed result: the handler
+     * prepares the result, then produces it chunk by chunk into the admitted RAM
+     * response span only to digest it. The result is never stored; READ_CHUNK
+     * produces each chunk again. The descriptor is written last.
+     */
+    private short prepareStreamedResult(
+            byte[] response,
+            short responseOffset,
+            short responseCapacity,
+            byte[] callerWorkspace,
+            short callerWorkspaceOffset,
+            short callerWorkspaceCapacity) {
+        short chunkSize = scalars[IDX_RESPONSE_CHUNK_SIZE];
+        ensureResponseCapacity(responseCapacity,
+                chunkSize > DESCRIPTOR_LENGTH ? chunkSize : DESCRIPTOR_LENGTH);
+        Handler handler = (Handler) handlerSlot[IDX_HANDLER];
+        byte method = (byte) scalars[IDX_ACTIVE_METHOD];
+        short total = handler.prepareResult(method, workspace, (short) 0, scalars[IDX_INPUT_LENGTH],
+                callerWorkspace, callerWorkspaceOffset, callerWorkspaceCapacity);
+        if (total <= 0 || total > scalars[IDX_RESPONSE_MAX_LENGTH]) {
+            fail(SW_WRONG_LENGTH);
+        }
+        sha256.resetDigest();
+        short offset = (short) 0;
+        while (offset < total) {
+            short length = (short) (total - offset);
+            if (length > chunkSize) {
+                length = chunkSize;
+            }
+            handler.produceResult(method, workspace, (short) 0, scalars[IDX_INPUT_LENGTH],
+                    offset, response, responseOffset, length,
+                    callerWorkspace, callerWorkspaceOffset, callerWorkspaceCapacity);
+            sha256.updateDigest(response, responseOffset, length);
+            offset = (short) (offset + length);
+        }
+        sha256.digest(response, responseOffset, (short) 0, digestScratch, (short) 0);
+        scalars[IDX_RESULT_LENGTH] = total;
+        scalars[IDX_RESULT_PACKET_COUNT] = (short) ((total + chunkSize - 1) / chunkSize);
+        scalars[IDX_STATE] = STATE_READ_PENDING;
+        return writeDescriptor(response, responseOffset, responseCapacity);
+    }
+{{- end}}
 
     private short shortOutputCapacity() {
         return scalars[IDX_EXACT_SHORT_RESPONSE_LENGTH] >= 0 ?
@@ -619,7 +879,10 @@ public final class {{.StreamRuntimeName}} implements {{.StreamEndpointName}} {
             byte p2,
             byte[] response,
             short responseOffset,
-            short responseCapacity) {
+            short responseCapacity{{if .StreamMixed}},
+            byte[] callerWorkspace,
+            short callerWorkspaceOffset,
+            short callerWorkspaceCapacity{{end}}) {
         if (!hasResponseStream() || scalars[IDX_STATE] != STATE_READ_PENDING) {
             fail(SW_WRONG_STATE);
         }
@@ -633,7 +896,16 @@ public final class {{.StreamRuntimeName}} implements {{.StreamEndpointName}} {
         int remaining = (scalars[IDX_RESULT_LENGTH] & 0xFFFF) - offset;
         int length = remaining < chunkSize ? remaining : chunkSize;
         ensureResponseCapacity(responseCapacity, (short) length);
+{{- if .StreamMixed}}
+        // Produce the chunk again into the admitted RAM span; it is never stored.
+        requireNonPersistentOutput(response, callerWorkspace);
+        ((Handler) handlerSlot[IDX_HANDLER]).produceResult(
+                (byte) scalars[IDX_ACTIVE_METHOD], workspace, (short) 0, scalars[IDX_INPUT_LENGTH],
+                (short) offset, response, responseOffset, (short) length,
+                callerWorkspace, callerWorkspaceOffset, callerWorkspaceCapacity);
+{{- else}}
         copy(workspace, (short) offset, response, responseOffset, (short) length);
+{{- end}}
         return (short) length;
     }
 
@@ -815,6 +1087,15 @@ public final class {{.StreamRuntimeName}} implements {{.StreamEndpointName}} {
             return false;
         }
     }
+{{- if .StreamMixed}}
+
+    /** Admit one span the runtime or handler may write: proven RAM only. */
+    private void requireRamSpan(byte[] buffer) {
+        if (!isNonPersistent(buffer)) {
+            fail(SW_WRONG_STATE);
+        }
+    }
+{{- end}}
 {{- end}}
 }
 `
@@ -1027,6 +1308,9 @@ import javacard.security.MessageDigest;
 
 func buildJavaStreamOwnedFields(data *javaTemplateData, methods []javaMethodRender) string {
 	workspaceLength := javaStreamWorkspaceLength(methods)
+	if data.StreamMixed {
+		workspaceLength = javaStreamMixedWorkspaceLength(methods)
+	}
 	return fmt.Sprintf(`    public static final short STREAM_WORKSPACE_LENGTH = (short) %d;
     public static final short STREAM_DIGEST_LENGTH = (short) 32;
     public static final short STREAM_SCALAR_COUNT = %s.SCALAR_COUNT;
@@ -1233,6 +1517,10 @@ func buildJavaStreamDispatchSupport(data *javaTemplateData, methods []javaMethod
 	if !data.StreamAuthenticated {
 		return b.String()
 	}
+	source := b.String()
+	if data.StreamMixed {
+		source = mixedJavaStreamDispatchSupport(source, methods)
+	}
 	// The applet states the authority of this exact APDU; the runtime refuses an
 	// unauthenticated stream APDU before any session or persistent effect.
 	return strings.NewReplacer(
@@ -1244,7 +1532,7 @@ func buildJavaStreamDispatchSupport(data *javaTemplateData, methods []javaMethod
 		"            short callerWorkspaceCapacity,\n            boolean authenticated) {\n        short row = streamRow(ins);",
 		"                    callerWorkspace, callerWorkspaceOffset, callerWorkspaceCapacity);\n        } catch (",
 		"                    callerWorkspace, callerWorkspaceOffset, callerWorkspaceCapacity,\n                    authenticated);\n        } catch (",
-	).Replace(b.String())
+	).Replace(source)
 }
 
 // writeJavaByteRows prints count entries, four per line, indented as a Java array
@@ -1267,6 +1555,9 @@ func writeJavaByteRows(b *strings.Builder, count int, entry func(int) string) {
 }
 
 func buildJavaStreamAbstractSupport(data *javaTemplateData, methods []javaMethodRender) string {
+	if data.StreamMixed {
+		return buildJavaStreamMixedAbstractSupport(methods)
+	}
 	var b strings.Builder
 	b.WriteString(`    @Override
     public final void digest(

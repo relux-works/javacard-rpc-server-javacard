@@ -164,7 +164,7 @@ func TestPluginRefusalsHaveNoEffects(t *testing.T) {
 	})
 }
 
-// The compiled transitive graph permits only released pluginapi outside this
+// The compiled transitive graph permits only released pluginapi v0.1.2 outside this
 // module, never the facade/parser. Reading failures cannot look like absence.
 func TestPluginPublishedDependencyBoundary(t *testing.T) {
 	c := exec.Command("go", "list", "-deps", "-f", "{{if .Module}}{{.ImportPath}} {{.Module.Path}} {{.Module.Version}} {{if .Module.Replace}}REPLACED{{end}}{{end}}", ".")
@@ -185,7 +185,7 @@ func TestPluginPublishedDependencyBoundary(t *testing.T) {
 		if f[1] == "github.com/relux-works/javacard-rpc-server-javacard" {
 			continue
 		}
-		if len(f) != 3 || f[0] != "github.com/relux-works/javacard-rpc/pluginapi" || f[1] != "github.com/relux-works/javacard-rpc/pluginapi" || f[2] != "v0.1.1" {
+		if len(f) != 3 || f[0] != "github.com/relux-works/javacard-rpc/pluginapi" || f[1] != "github.com/relux-works/javacard-rpc/pluginapi" || f[2] != "v0.1.2" {
 			t.Fatalf("forbidden dependency: %q", line)
 		}
 		api = true

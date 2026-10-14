@@ -12,15 +12,16 @@ import (
 // accepted authenticated WRITE chunk or an accepted short-result receipt.
 const StreamWorkspaceCleanupAuthenticatedInvalidate = "authenticated-invalidate"
 
-// requireAuthenticatedInvalidateMethods refuses response streams. A streamed
-// response is produced by the handler into the persistent workspace during the
-// CLOSE_WRITE APDU, so a handler that fails after its first output store, or a
-// handler result the runtime rejects, would leave persistent writes on a
-// refused APDU. Short results are staged in the caller response span instead.
+// requireAuthenticatedInvalidateMethods refuses response streams outside the
+// public-invalidate mode. A streamed response stored by the handler in the
+// persistent workspace during CLOSE_WRITE would leave persistent writes on an
+// APDU the runtime may still refuse. Short results are staged in the caller
+// response span instead, and a public-invalidate streamed result is produced
+// into the admitted RAM response span on each read, never stored.
 func requireAuthenticatedInvalidateMethods(methods []javaMethodRender) error {
 	var refused []string
 	for _, method := range methods {
-		if method.IsStream && method.ResponseStream != nil {
+		if method.IsStream && method.ResponseStream != nil && method.StreamMode != StreamModePublicInvalidate {
 			refused = append(refused, fmt.Sprintf("%s (INS 0x%02X)", method.Name, method.INS))
 		}
 	}
