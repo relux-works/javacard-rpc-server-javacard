@@ -25,7 +25,7 @@ in this module (`codegen.StreamWorkspaceCleanupAuthenticatedInvalidate`). A
 facade release must admit the selector before the CLI can emit it.
 
 Evidence: Go source tests, jCardSim logical-store ledger with positive and
-negative instrument controls, seven runtime narrowing mutants, one
+negative instrument controls, fourteen runtime narrowing mutants, one
 token-preserving mutant, one generation-time Go mutant, allocation payload and
 Classic 3.0.5u4 CAP conversion with off-card verification. Physical-card
 behavior, JCRE/native writes and card-wide RAM totals are not claimed.

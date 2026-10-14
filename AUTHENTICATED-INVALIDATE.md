@@ -112,7 +112,10 @@ Tests (`codegen/gen_java_authenticated_test.go`): selector refusals with a
 positive control; named response-stream refusal of the real Auth fixture;
 source contract; the simulator scenario above; ledger controls (a planted
 same-value persistent store, also through an alias, fails the zero gate by name;
-a planted transient store passes); seven runtime narrowing mutants, one
+a planted transient store passes); fourteen runtime narrowing mutants (seven gate weakenings and one
+same-value persistent store planted on exactly one refusal or invalidation
+path each for bad CLOSE digest, ABORT, foreign method, handler failure,
+deselect, out-of-order retry and oversized declaration), one
 token-preserving mutant and one generation-time Go mutant, each killed by a
 named assertion; allocation payload; Classic 3.0.5u4 CAP conversion with
 off-card verification for both lifecycle choices.
