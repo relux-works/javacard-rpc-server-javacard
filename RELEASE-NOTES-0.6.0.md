@@ -5,7 +5,12 @@ selector. With persistent storage it generates a runtime in which only an APDU
 the owning applet marks authenticated can stage bytes in the persistent
 workspace, every refusal, abort, deselect, CLOSE and reset invalidates the
 session in transient memory only, and short handler results are staged in the
-caller's response span and copied to the workspace only after validation.
+caller's response span and copied to the workspace only after validation. A
+CLOSE_WRITE is admitted only when its response span and caller workspace are
+proven RAM (a transient array or the current APDU buffer); otherwise it is
+refused `6985` before the handler runs. Every refused authenticated APDU,
+including a foreign method, invalidates the session; only the unauthenticated
+`6982` refusal leaves it intact.
 Response-stream methods are refused at generation in this mode. See
 [the contract, retained-data rules and measurements](AUTHENTICATED-INVALIDATE.md).
 
@@ -25,7 +30,8 @@ in this module (`codegen.StreamWorkspaceCleanupAuthenticatedInvalidate`). A
 facade release must admit the selector before the CLI can emit it.
 
 Evidence: Go source tests, jCardSim logical-store ledger with positive and
-negative instrument controls, fourteen runtime narrowing mutants, one
+negative instrument controls, twenty runtime narrowing mutants, two review
+regression witnesses, one
 token-preserving mutant, one generation-time Go mutant, allocation payload and
 Classic 3.0.5u4 CAP conversion with off-card verification. Physical-card
 behavior, JCRE/native writes and card-wide RAM totals are not claimed.

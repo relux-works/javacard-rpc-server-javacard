@@ -115,6 +115,8 @@ func authenticatedSourceContract(r *JavaGenerationResult) error {
 		{"adapter parameter", adapter, "public boolean processIfStream(APDU apdu, boolean authenticated) {"},
 		{"adapter forwarding", adapter, "(short) apduBuffer.length,\n                    authenticated);"},
 		{"handler output span", runtime, "input, inputOffset, inputSize,\n                response, responseOffset, outputCapacity,"},
+		{"output admission", runtime, "requireCloseData(requestLength);\n        requireNonPersistentOutput(response, callerWorkspace);"},
+		{"admission predicate", runtime, "return buffer == javacard.framework.APDU.getCurrentAPDUBuffer();"},
 	} {
 		if strings.Count(check.source, check.want) != 1 {
 			return fmt.Errorf("%s: %q appears %d times", check.label, check.want, strings.Count(check.source, check.want))
@@ -124,6 +126,11 @@ func authenticatedSourceContract(r *JavaGenerationResult) error {
 		if strings.Contains(runtime, forbidden) {
 			return fmt.Errorf("runtime keeps persistent cleanup %q", forbidden)
 		}
+	}
+	// Only the pre-auth gate refuses without invalidating; every refused
+	// authenticated APDU invalidates the transient session.
+	if n := strings.Count(runtime, "rejectWithoutClearing("); n != 2 {
+		return fmt.Errorf("rejectWithoutClearing appears %d times, want the gate and its definition", n)
 	}
 	if !strings.Contains(runtime, "SCALAR_COUNT = (short) 17;") {
 		return fmt.Errorf("scalar layout changed")
@@ -235,9 +242,9 @@ func TestAuthenticatedInvalidateLedgerControls(t *testing.T) {
 	for _, tc := range []struct {
 		name, plant, killed string
 	}{
-		{"persistent-one-byte", "        workspace[0] = workspace[0];\n", "post-reset retry wrote persistent"},
+		{"persistent-one-byte", "        workspace[0] = workspace[0];\n", "post-reset refusal wrote persistent"},
 		// Classification is by array identity, not by the name in the source.
-		{"aliased-persistent-one-byte", "        byte[] alias = workspace;\n        alias[0] = alias[0];\n", "post-reset retry wrote persistent"},
+		{"aliased-persistent-one-byte", "        byte[] alias = workspace;\n        alias[0] = alias[0];\n", "post-reset refusal wrote persistent"},
 		{"transient-one-byte", "        digestScratch[0] = digestScratch[0];\n", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -287,7 +294,16 @@ func TestAuthenticatedInvalidateNarrowingMutants(t *testing.T) {
 		// refusal or invalidation path; every other path stays write-free.
 		{"bad-close-digest-writes", [][2]string{{"        if (!equalsRange(digestScratch, (short) 0, request, digestOffset, DIGEST_LENGTH)) {\n            fail(SW_INVALID_DATA);", "        if (!equalsRange(digestScratch, (short) 0, request, digestOffset, DIGEST_LENGTH)) {\n            workspace[0] = workspace[0];\n            fail(SW_INVALID_DATA);"}}, "refused bad close digest wrote persistent"},
 		{"abort-writes", [][2]string{{"                abort(ABORT_EXPLICIT);\n                return (short) 0;", "                workspace[0] = workspace[0];\n                abort(ABORT_EXPLICIT);\n                return (short) 0;"}}, "abort wrote persistent"},
-		{"foreign-method-writes", [][2]string{{"                } else if (scalars[IDX_ACTIVE_METHOD] != methodId) {\n                    rejectWithoutClearing(SW_WRONG_STATE);", "                } else if (scalars[IDX_ACTIVE_METHOD] != methodId) {\n                    workspace[0] = workspace[0];\n                    rejectWithoutClearing(SW_WRONG_STATE);"}}, "refused foreign method wrote persistent"},
+		{"foreign-method-writes", [][2]string{{"                    // A refused authenticated APDU invalidates the live handle.\n                    fail(SW_WRONG_STATE);", "                    // A refused authenticated APDU invalidates the live handle.\n                    workspace[0] = workspace[0];\n                    fail(SW_WRONG_STATE);"}}, "refused foreign method wrote persistent"},
+		// Output admission: the guard stays and admits exactly one persistent
+		// member: one method, one span, or one array shape.
+		{"admission-admits-sign-method", [][2]string{{"        if (!isNonPersistent(response) || !isNonPersistent(callerWorkspace)) {", "        if (scalars[IDX_ACTIVE_METHOD] != 1 && (!isNonPersistent(response) || !isNonPersistent(callerWorkspace))) {"}}, "persistent response admitted"},
+		{"admission-skips-caller-workspace", [][2]string{{"        if (!isNonPersistent(response) || !isNonPersistent(callerWorkspace)) {", "        if (!isNonPersistent(response)) {"}}, "persistent caller workspace admitted"},
+		{"predicate-admits-255-byte-array", [][2]string{{"            return buffer == javacard.framework.APDU.getCurrentAPDUBuffer();", "            return buffer == javacard.framework.APDU.getCurrentAPDUBuffer() || buffer.length == 255;"}}, "persistent response admitted"},
+		{"admission-skips-receipt-retry", [][2]string{{"        requireCloseData(requestLength);\n        requireNonPersistentOutput(response, callerWorkspace);", "        requireCloseData(requestLength);\n        if (scalars[IDX_STATE] != STATE_SHORT_CLOSED) {\n            requireNonPersistentOutput(response, callerWorkspace);\n        }"}}, "persistent receipt retry admitted"},
+		// Foreign refusal: invalidation kept for every method but one.
+		{"foreign-write-keeps-sign-handle", [][2]string{{"                    // A refused authenticated APDU invalidates the live handle.\n                    fail(SW_WRONG_STATE);", "                    // A refused authenticated APDU invalidates the live handle.\n                    if (scalars[IDX_ACTIVE_METHOD] == 1) {\n                        rejectWithoutClearing(SW_WRONG_STATE);\n                    }\n                    fail(SW_WRONG_STATE);"}}, "foreign refusal retained live handle"},
+		{"foreign-close-keeps-sign-handle", [][2]string{{"                    scalars[IDX_ACTIVE_METHOD] != methodId) {\n                fail(SW_WRONG_STATE);", "                    scalars[IDX_ACTIVE_METHOD] != methodId) {\n                if (scalars[IDX_STATE] != STATE_EMPTY && scalars[IDX_ACTIVE_METHOD] == 1) {\n                    rejectWithoutClearing(SW_WRONG_STATE);\n                }\n                fail(SW_WRONG_STATE);"}}, "foreign close retained live handle"},
 		{"handler-failure-writes", [][2]string{{"            if (e != failure) {\n                clearAll();", "            if (e != failure) {\n                workspace[0] = workspace[0];\n                clearAll();"}}, "handler failure wrote persistent"},
 		{"deselect-writes", [][2]string{{"    public void abort(byte reason) {\n", "    public void abort(byte reason) {\n        if (reason == ABORT_DESELECT) {\n            workspace[0] = workspace[0];\n        }\n"}}, "adapter: deselect wrote persistent"},
 		{"out-of-order-retry-writes", [][2]string{{"                index != (scalars[IDX_NEXT_PACKET_INDEX] & 0xFF)) {\n            fail(SW_INVALID_DATA);", "                index != (scalars[IDX_NEXT_PACKET_INDEX] & 0xFF)) {\n            workspace[0] = workspace[0];\n            fail(SW_INVALID_DATA);"}}, "post-reset retry wrote persistent"},
@@ -431,8 +447,11 @@ public final class AuthShapeApplet extends Applet {
  static boolean authenticated=true, direct=false;
  // 0 accept, 1 fail after full output, 2 return capacity+1, 3 fail before output
  static int control=0;
+ // Direct route output span: 0 APDU buffer, 1 persistent response, 2 persistent caller workspace, 3 transient response
+ static int output=0, handlerCalls=0;
  final Logic logic=new Logic();final AuthShapeStreamAPDUAdapter adapter=new AuthShapeStreamAPDUAdapter(logic);
  final byte[] noData=new byte[0];
+ final byte[] persistentSpan=new byte[255];final byte[] transientSpan=JCSystem.makeTransientByteArray((short)255,JCSystem.CLEAR_ON_RESET);
  public static void install(byte[] b,short o,byte l){new AuthShapeApplet().register();}
  AuthShapeApplet(){installed=this;}
  public void deselect(){adapter.deselect();}
@@ -445,7 +464,9 @@ public final class AuthShapeApplet extends Applet {
    byte ins=buf[ISO7816.OFFSET_INS],p1=buf[ISO7816.OFFSET_P1],p2=buf[ISO7816.OFFSET_P2];
    short len=apdu.setIncomingAndReceive();
    for(short i=0;i<len;i++){NvmLedger.store(buf);buf[i]=buf[(short)(ISO7816.OFFSET_CDATA+i)];}
-   short out=logic.dispatchStreamTo(ins,p1,p2,buf,(short)0,len,buf,(short)0,(short)255,buf,(short)0,(short)buf.length,authenticated);
+   byte[] resp=output==1?persistentSpan:output==3?transientSpan:buf;byte[] work=output==2?persistentSpan:buf;
+   short out=logic.dispatchStreamTo(ins,p1,p2,buf,(short)0,len,resp,(short)0,(short)255,work,(short)0,(short)work.length,authenticated);
+   if(out>0&&resp!=buf)for(short i=0;i<out;i++){NvmLedger.store(buf);buf[i]=resp[i];}
    if(out>0)apdu.setOutgoingAndSend((short)0,out);
    return;
   }
@@ -462,6 +483,7 @@ public final class AuthShapeApplet extends Applet {
    return result(input,io,il,output,oo,oc,w,wo,(short)36);
   }
   private short result(byte[] input,short io,short il,byte[] output,short oo,short oc,byte[] w,short wo,short width){
+   handlerCalls++;
    if(control==3)failStream((short)0x6A80);
    // Scratch first, as the Auth relay does, then the output last.
    for(short i=0;i<16;i++){NvmLedger.store(w);w[(short)(wo+i)]=(byte)0x5A;}
@@ -499,7 +521,7 @@ public class AuthShapeHarness {
   // Ledger controls: the workspace is persistent, a transient array is not.
   NvmLedger.reset();NvmLedger.store(workspace);NvmLedger.store(JCSystem.makeTransientByteArray((short)1,JCSystem.CLEAR_ON_RESET));
   if(NvmLedger.persistent!=1||NvmLedger.transientStores!=1)throw new AssertionError("ledger classification control");
-  for(boolean direct:new boolean[]{false,true}){AuthShapeApplet.direct=direct;route=direct?"direct":"adapter";scenario();}
+  for(boolean direct:new boolean[]{false,true}){AuthShapeApplet.direct=direct;route=direct?"direct":"adapter";scenario();if(direct)outputAdmission();}
   direct(session);
   System.out.println("authenticated-invalidate: pre-auth, accepted, refusal, reset and retained-data controls green on adapter and direct routes");
  }
@@ -552,11 +574,19 @@ public class AuthShapeHarness {
   expect(0x6985,0x21,0,0,close(full),0,"close after refused close wrote persistent");
   expect(0x9000,0x20,0,2,a,192,"accepted chunk before short close");expect(0x9000,0x20,1,2,b,5,"accepted tail before short close");
   expect(0x6700,0x21,0,0,Arrays.copyOf(close(full),33),0,"refused close length wrote persistent");
-  // Foreign method leaves the live session usable.
+  // Foreign method: refused with 0 B and the refusal invalidates the live
+  // handle, so the old CLOSE and a chunk retry are refused; a fresh session works.
   expect(0x9000,0x20,0,2,a,192,"accepted chunk before foreign");
+  expect(0x9000,0x20,1,2,b,5,"accepted tail before foreign attack");
   expect(0x6985,0x58,0,1,b,0,"refused foreign method wrote persistent");
-  expect(0x9000,0x20,1,2,b,5,"session survives foreign method");
-  if(!Arrays.equals(result(full,73),expect(0x9000,0x21,0,0,close(full),73,"close after foreign method")))throw new AssertionError("foreign method corrupted session");
+  expect(0x6985,0x21,0,0,close(full),0,"foreign refusal retained live handle");
+  expect(0x6A80,0x20,1,2,b,0,"retry after foreign refusal wrote persistent");
+  // A CLOSE for another method is the same foreign refusal.
+  expect(0x9000,0x20,0,2,a,192,"accepted chunk before foreign close");
+  expect(0x9000,0x20,1,2,b,5,"accepted tail before foreign close");
+  expect(0x6985,0x59,0,0,close(full),0,"refused foreign close wrote persistent");
+  expect(0x6985,0x21,0,0,close(full),0,"foreign close retained live handle");
+  if(!Arrays.equals(result(full,73),expect(0x9000,0x21,0,0,closeAfter(a,b,full),73,"fresh session after foreign refusal")))throw new AssertionError("fresh session after foreign refusal");
   // Handler failures: output is written, but only to the response span.
   AuthShapeApplet.control=1;
   expect(0x9000,0x20,0,2,a,192,"accepted chunk before handler failure");expect(0x9000,0x20,1,2,b,5,"accepted tail before handler failure");
@@ -599,6 +629,38 @@ public class AuthShapeHarness {
   if(NvmLedger.persistent!=4)throw new AssertionError("short result control stored "+NvmLedger.persistent);
   endpoint.abort(AuthShapeStreamEndpoint.ABORT_EXPLICIT);
  }
+ // Direct route: the caller chooses the output and caller-workspace arrays.
+ // A persistent span is refused on CLOSE before the handler or the receipt
+ // copy runs, and the refusal invalidates the session; transient and APDU
+ // spans are the accepted controls (the APDU span is the main scenario).
+ static void outputAdmission()throws Exception{
+  byte[] a=chunk(192,1),b=chunk(5,2),full=cat(a,b);
+  for(int[] c:new int[][]{{1,1},{1,0},{2,1},{2,0}}){
+   String kind=c[0]==1?"persistent response":"persistent caller workspace";
+   AuthShapeApplet.output=0;AuthShapeApplet.control=c[1];
+   expect(0x9000,0x20,0,2,a,192,"accepted chunk before "+kind);expect(0x9000,0x20,1,2,b,5,"accepted tail before "+kind);
+   int calls=AuthShapeApplet.handlerCalls;
+   AuthShapeApplet.output=c[0];
+   expect(0x6985,0x21,0,0,close(full),0,kind+" admitted");
+   if(AuthShapeApplet.handlerCalls!=calls)throw new AssertionError(kind+" admitted: handler ran");
+   AuthShapeApplet.output=0;AuthShapeApplet.control=0;
+   expect(0x6985,0x21,0,0,close(full),0,kind+" refusal retained live handle");
+  }
+  // Accepted receipt, then its retry into a persistent response is refused.
+  AuthShapeApplet.output=0;
+  byte[] signed=expect(0x9000,0x21,0,0,closeAfter(a,b,full),73,"accepted close before receipt retry");
+  AuthShapeApplet.output=1;
+  expect(0x6985,0x21,0,0,close(full),0,"persistent receipt retry admitted");
+  AuthShapeApplet.output=0;
+  expect(0x6985,0x21,0,0,close(full),0,"receipt retry refusal retained live handle");
+  // Transient response control: accepted, same result, receipt retry 0 B.
+  AuthShapeApplet.output=3;
+  if(!Arrays.equals(signed,expect(0x9000,0x21,0,0,closeAfter(a,b,full),73,"transient response close")))throw new AssertionError("transient response result");
+  if(!Arrays.equals(signed,expect(0x9000,0x21,0,0,close(full),0,"transient response retry wrote")))throw new AssertionError("transient response retry result");
+  AuthShapeApplet.output=0;
+  expect(0x9000,0x25,0,0,EMPTY,0,"abort after transient control");
+ }
+ static byte[] closeAfter(byte[] a,byte[] b,byte[] full){expect(0x9000,0x20,0,2,a,192,"fresh session first chunk");expect(0x9000,0x20,1,2,b,5,"fresh session tail");return close(full);}
  static void session(byte[] a,byte[] b,byte[] full,int width){
   expect(0x9000,0x20,0,2,a,192,"fresh session first chunk");expect(0x9000,0x20,1,2,b,5,"fresh session tail");
   if(!Arrays.equals(result(full,width),expect(0x9000,0x21,0,0,close(full),width,"fresh session close")))throw new AssertionError("fresh session result");
@@ -743,3 +805,44 @@ public final class AuthShapeApplet extends Applet {
     }
 }
 `
+
+// Review rev1 regression witnesses, kept under the reviewer's names. The
+// reviewer's probes edited the fixture; their assertions now live in the
+// shared harness, so each test pins its exact assertion lines and then drives
+// the real simulator suite through Simulator.transmitCommand -> Applet.process
+// -> dispatchStreamTo / processIfStream -> runtime.dispatch.
+func runReviewerWitness(t *testing.T, lines ...string) {
+	t.Helper()
+	for _, line := range lines {
+		if strings.Count(authShapeHarness, line) != 1 {
+			t.Fatalf("witness assertion missing from the harness: %s", line)
+		}
+	}
+	jar := simulatorJar(t)
+	output, err := runAuthShape(t, jar, authShapeResult(t, StreamMemoryClearOnReset))
+	if err != nil {
+		t.Fatalf("%v\n%s", err, output)
+	}
+}
+
+// A persistent response array on the direct route is refused before the
+// failing handler runs: 6985, 0 persistent stores, handler not invoked, and
+// the session is invalidated. Transient and APDU responses stay accepted.
+func TestReviewerPersistentResponseRefusal(t *testing.T) {
+	runReviewerWitness(t,
+		`expect(0x6985,0x21,0,0,close(full),0,kind+" admitted");`,
+		`if(AuthShapeApplet.handlerCalls!=calls)throw new AssertionError(kind+" admitted: handler ran");`,
+		`expect(0x6985,0x21,0,0,close(full),0,"persistent receipt retry admitted");`,
+		`expect(0x9000,0x21,0,0,closeAfter(a,b,full),73,"transient response close")`)
+}
+
+// A foreign-method refusal invalidates the live handle: the old valid CLOSE
+// is refused 6985 (rev1 returned 9000) and a chunk retry is refused 6A80,
+// both with 0 persistent stores.
+func TestReviewerForeignMethodInvalidates(t *testing.T) {
+	runReviewerWitness(t,
+		`expect(0x9000,0x20,1,2,b,5,"accepted tail before foreign attack");`,
+		`expect(0x6985,0x58,0,1,b,0,"refused foreign method wrote persistent");`,
+		`expect(0x6985,0x21,0,0,close(full),0,"foreign refusal retained live handle");`,
+		`expect(0x6A80,0x20,1,2,b,0,"retry after foreign refusal wrote persistent");`)
+}

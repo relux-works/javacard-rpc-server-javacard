@@ -276,7 +276,7 @@ public final class {{.StreamRuntimeName}} implements {{.StreamEndpointName}} {
         if (callerWorkspace == null || callerWorkspaceOffset < 0 || callerWorkspaceCapacity < 0 ||
                 callerWorkspaceOffset > callerWorkspace.length ||
                 callerWorkspaceCapacity > callerWorkspace.length - callerWorkspaceOffset) {
-            rejectWithoutClearing(SW_WRONG_LENGTH);
+            {{if .StreamAuthenticated}}fail{{else}}rejectWithoutClearing{{end}}(SW_WRONG_LENGTH);
         }
         try {
 {{if and .StreamWorkspacePersistent (not .StreamAuthenticated)}}            // Transient state is already empty after reset; clean retained NVM
@@ -306,11 +306,14 @@ public final class {{.StreamRuntimeName}} implements {{.StreamEndpointName}} {
                             responseEnabled, responseLimit, responseChunk,
                             shortResponseLength, handler);
                 } else if (scalars[IDX_ACTIVE_METHOD] != methodId) {
-                    rejectWithoutClearing(SW_WRONG_STATE);
+{{- if .StreamAuthenticated}}
+                    // A refused authenticated APDU invalidates the live handle.
+{{- end}}
+                    {{if .StreamAuthenticated}}fail{{else}}rejectWithoutClearing{{end}}(SW_WRONG_STATE);
                 }
             } else if (scalars[IDX_STATE] == STATE_EMPTY ||
                     scalars[IDX_ACTIVE_METHOD] != methodId) {
-                rejectWithoutClearing(SW_WRONG_STATE);
+                {{if .StreamAuthenticated}}fail{{else}}rejectWithoutClearing{{end}}(SW_WRONG_STATE);
             }
 
             switch (operation) {
@@ -420,7 +423,7 @@ public final class {{.StreamRuntimeName}} implements {{.StreamEndpointName}} {
             short callerWorkspaceCapacity) {
         if (!hasRequestStream()) {
             if (scalars[IDX_STATE] != STATE_EMPTY) {
-                rejectWithoutClearing(SW_WRONG_STATE);
+                {{if .StreamAuthenticated}}fail{{else}}rejectWithoutClearing{{end}}(SW_WRONG_STATE);
             }
             requireZeroParameters(p1, p2);
             preflightHandlerResponse(responseCapacity);
@@ -488,6 +491,9 @@ public final class {{.StreamRuntimeName}} implements {{.StreamEndpointName}} {
             short callerWorkspaceCapacity) {
         requireZeroParameters(p1, p2);
         requireCloseData(requestLength);
+{{- if .StreamAuthenticated}}
+        requireNonPersistentOutput(response, callerWorkspace);
+{{- end}}
 
         int declaredLength = readU16(request, requestOffset);
         short digestOffset = (short) (requestOffset + 2);
@@ -782,6 +788,34 @@ public final class {{.StreamRuntimeName}} implements {{.StreamEndpointName}} {
         failure.setStatusWord(statusWord);
         throw failure;
     }
+{{- if .StreamAuthenticated}}
+
+    /**
+     * The handler may write its output span and the caller workspace before it
+     * fails, and the CLOSE retry copies the receipt into the output span. Admit
+     * only spans proven to be RAM: a transient array, or the current APDU buffer
+     * while the selected applet processes its APDU. Outside that context the
+     * APDU getter throws and only a transient array is proven. Refusal
+     * invalidates the session before any handler or copy runs.
+     */
+    private void requireNonPersistentOutput(byte[] response, byte[] callerWorkspace) {
+        if (!isNonPersistent(response) || !isNonPersistent(callerWorkspace)) {
+            fail(SW_WRONG_STATE);
+        }
+    }
+
+    private static boolean isNonPersistent(byte[] buffer) {
+        if (javacard.framework.JCSystem.isTransient(buffer) !=
+                javacard.framework.JCSystem.NOT_A_TRANSIENT_OBJECT) {
+            return true;
+        }
+        try {
+            return buffer == javacard.framework.APDU.getCurrentAPDUBuffer();
+        } catch (SecurityException e) {
+            return false;
+        }
+    }
+{{- end}}
 }
 `
 
