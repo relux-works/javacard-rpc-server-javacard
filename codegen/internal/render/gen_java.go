@@ -408,7 +408,11 @@ type javaTemplateData struct {
 	StreamDigestExternalAccess string
 	StreamWorkspacePersistent  bool
 	StreamCleanupTracked       bool
-	StreamCLAMatch             string
+	// StreamAuthenticated selects the authenticated-invalidate runtime: persistent
+	// workspace only for authenticated APDUs, transient-only refusal invalidation
+	// and short handler output staged in the caller response span.
+	StreamAuthenticated bool
+	StreamCLAMatch      string
 }
 
 // StreamMemory selects the transient memory the generated stream state lives in.
@@ -505,7 +509,7 @@ func GenerateJavaSkeletonWithOptions(s *Schema, packageName string, options Java
 	}
 	switch s.Applet.StreamWorkspaceCleanup {
 	case "":
-	case pluginapi.StreamWorkspaceCleanupWholeReplyArea:
+	case pluginapi.StreamWorkspaceCleanupWholeReplyArea, StreamWorkspaceCleanupAuthenticatedInvalidate:
 		if s.Applet.StreamWorkspace != "persistent" {
 			return nil, fmt.Errorf("stream workspace cleanup requires persistent stream workspace")
 		}
@@ -519,6 +523,11 @@ func GenerateJavaSkeletonWithOptions(s *Schema, packageName string, options Java
 	methods, err := renderMethods(s)
 	if err != nil {
 		return nil, err
+	}
+	if s.Applet.StreamWorkspaceCleanup == StreamWorkspaceCleanupAuthenticatedInvalidate {
+		if err := requireAuthenticatedInvalidateMethods(methods); err != nil {
+			return nil, err
+		}
 	}
 
 	data := javaTemplateData{
@@ -540,7 +549,8 @@ func GenerateJavaSkeletonWithOptions(s *Schema, packageName string, options Java
 		StreamAPDUAdapterName:     toPascal(s.Applet.Name) + "StreamAPDUAdapter",
 		StreamTransientEvent:      streamEvent,
 		StreamWorkspacePersistent: s.Applet.StreamWorkspace == "persistent",
-		StreamCleanupTracked:      s.Applet.StreamWorkspaceCleanup != "",
+		StreamCleanupTracked:      s.Applet.StreamWorkspaceCleanup == pluginapi.StreamWorkspaceCleanupWholeReplyArea,
+		StreamAuthenticated:       s.Applet.StreamWorkspaceCleanup == StreamWorkspaceCleanupAuthenticatedInvalidate,
 		StreamCLAMatch:            javaStreamCLAMatch(s.Applet.CLA),
 
 		StreamDigestExternalAccess: streamDigestExternalAccess,

@@ -3,19 +3,19 @@
 Java Card code-generation backend and on-card runtime for
 [javacard-rpc](https://github.com/relux-works/javacard-rpc). The root repository tag
 versions both components: the Go backend lives in codegen/ and the Java runtime
-keeps its normal root Gradle layout. The `v0.5.0` release candidate pairs Go module
-version `v0.5.0` with runtime version `0.5.0` at the same repository commit. Runtime
-coordinates are `io.jcrpc:javacard-rpc-server-javacard:0.5.0`; the group, artifact
+keeps its normal root Gradle layout. The `v0.6.0` release candidate pairs Go module
+version `v0.6.0` with runtime version `0.6.0` at the same repository commit. Runtime
+coordinates are `io.jcrpc:javacard-rpc-server-javacard:0.6.0`; the group, artifact
 name and Java package `io.jcrpc.server` are unchanged.
 
 ## Version pins
 
 Use the root module version for the backend:
 
-The following pins and tag commands apply once `v0.5.0` is published.
+The following pins and tag commands apply once `v0.6.0` is published.
 
 ```sh
-go get github.com/relux-works/javacard-rpc-server-javacard@v0.5.0
+go get github.com/relux-works/javacard-rpc-server-javacard@v0.6.0
 ```
 
 Build the runtime from the same root tag with the included Gradle wrapper:
@@ -23,16 +23,16 @@ Build the runtime from the same root tag with the included Gradle wrapper:
 ```sh
 git clone https://github.com/relux-works/javacard-rpc-server-javacard.git
 cd javacard-rpc-server-javacard
-git verify-tag v0.5.0
-git checkout --detach v0.5.0
-git rev-parse 'v0.5.0^{commit}'
+git verify-tag v0.6.0
+git checkout --detach v0.6.0
+git rev-parse 'v0.6.0^{commit}'
 ./gradlew build --no-daemon
 ```
 
 The peeled tag commit identifies both components; the runtime jar is
-`build/libs/javacard-rpc-server-javacard-0.5.0.jar`. These instructions build
+`build/libs/javacard-rpc-server-javacard-0.6.0.jar`. These instructions build
 from source; they do not require a Maven repository publication. See
-[release notes](RELEASE-NOTES-0.5.0.md) for compatibility and verification limits.
+[release notes](RELEASE-NOTES-0.6.0.md) for compatibility and verification limits.
 
 ## Requirements
 
@@ -55,7 +55,10 @@ files. Consumers must supply Namespace and SimulatorDependency (for example
 com.klinec:jcardsim:3.0.5.9); empty StreamMemory retains the released default.
 Unknown workspace or memory policies return an error without a partial package.
 Explicit `Applet.StreamWorkspaceCleanup` value `whole-reply-area` requires
-persistent workspace. `written-bytes-only` is rejected; handlers keep the
+persistent workspace. Value `authenticated-invalidate` also requires persistent
+workspace: only APDUs the applet marks authenticated reach it, refusals write
+nothing persistent, and response-stream methods are refused; see
+[authenticated workspace contract](AUTHENTICATED-INVALIDATE.md). `written-bytes-only` is rejected; handlers keep the
 stream raw-array API. Empty cleanup preserves
 released bytes. See [cleanup contract and measured costs](PERSISTENT-WORKSPACE-COSTS.md)
 for migration, lifecycle behavior, measurements and their limits.

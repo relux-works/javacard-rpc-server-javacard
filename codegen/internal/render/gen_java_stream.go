@@ -34,6 +34,11 @@ public interface {{.StreamEndpointName}} {
      * failStream(statusWord). No command-path allocation is permitted.
      * Caller workspace is borrowed only for this dispatch. Invalid workspace
      * refuses before session effects and does not clear a valid pending session.
+{{- if .StreamAuthenticated}}
+     * The owning applet passes authenticated for this exact APDU. An
+     * unauthenticated APDU is refused with 6982 before any session or
+     * persistent effect; persistent workspace is reachable only when it is true.
+{{- end}}
      */
     short dispatch(
             byte methodId,
@@ -56,7 +61,8 @@ public interface {{.StreamEndpointName}} {
             short responseCapacity,
             byte[] callerWorkspace,
             short callerWorkspaceOffset,
-            short callerWorkspaceCapacity);
+            short callerWorkspaceCapacity{{if .StreamAuthenticated}},
+            boolean authenticated{{end}});
 
     void abort(byte reason);
 
@@ -70,6 +76,11 @@ public interface {{.StreamEndpointName}} {
          * Caller workspace is the actual entry span, independent of the owned
          * session output. Never retain borrowed references; consume overlapping
          * input before scratch writes and preserve output through its final read.
+{{- if .StreamAuthenticated}}
+         * Input is the persistent workspace and is read-only. Output is the
+         * caller's response span, which may alias the caller workspace: write
+         * it after the last scratch use. A refused result leaves no persistent byte.
+{{- end}}
          */
         short execute(
                 byte methodId,
@@ -121,7 +132,18 @@ const javaStreamRuntimeTemplate = `package {{.PackageName}};
 /**
  * Generated single-owner, bounded, half-duplex stream state machine.
  *
-{{if .StreamWorkspacePersistent}} * Only the bulk workspace is persistent. Scalar state, handler reference,
+{{if .StreamAuthenticated}} * Only the bulk workspace is persistent, and only an APDU the owning applet
+ * marks authenticated may reach it; any other stream APDU is refused with 6982
+ * before any effect. Scalar state, handler reference and digest scratch are
+ * transient. Persistent writes happen only on an accepted authenticated APDU:
+ * a WRITE chunk copied after every shape, order and duplicate check, and the
+ * short-result receipt copied after the handler result was validated. Handler
+ * output is staged in the caller's response span, never in the workspace.
+ * Refusal, abort, deselect, CLOSE and reset invalidate the transient session
+ * only. Retained workspace bytes are public data from earlier accepted APDUs;
+ * they are not erased, and no live state addresses them after invalidation.
+ * Command processing reuses one exception and allocates no object or array.
+{{else if .StreamWorkspacePersistent}} * Only the bulk workspace is persistent. Scalar state, handler reference,
  * digest scratch and reset detection remain transient. Reset invalidates the
  * session immediately; retained workspace bytes are wiped on the next dispatch.
  * Abort, deselect and protocol failure explicitly wipe the workspace. These
@@ -141,6 +163,9 @@ public final class {{.StreamRuntimeName}} implements {{.StreamEndpointName}} {
     private static final short SW_INVALID_DATA = (short) 0x6A80;
     private static final short SW_WRONG_STATE  = (short) 0x6985;
     private static final short SW_NO_MEMORY    = (short) 0x6A84;
+{{- if .StreamAuthenticated}}
+    private static final short SW_SECURITY_STATUS_NOT_SATISFIED = (short) 0x6982;
+{{- end}}
 
     private static final byte STATE_EMPTY        = (byte) 0x00;
     private static final byte STATE_WRITING      = (byte) 0x01;
@@ -187,7 +212,7 @@ public final class {{.StreamRuntimeName}} implements {{.StreamEndpointName}} {
     private final Object[] handlerSlot;
     private final Sha256 sha256;
     private final StreamStatusWordException failure;
-{{if .StreamWorkspacePersistent}}    private final byte[] resetMarker;
+{{if and .StreamWorkspacePersistent (not .StreamAuthenticated)}}    private final byte[] resetMarker;
 {{end}}
     public {{.StreamRuntimeName}}(
             byte[] workspace,
@@ -196,7 +221,7 @@ public final class {{.StreamRuntimeName}} implements {{.StreamEndpointName}} {
             Object[] handlerSlot,
             Sha256 sha256) {
         this.workspace = workspace;
-{{if .StreamWorkspacePersistent}}        this.resetMarker = javacard.framework.JCSystem.makeTransientByteArray(
+{{if and .StreamWorkspacePersistent (not .StreamAuthenticated)}}        this.resetMarker = javacard.framework.JCSystem.makeTransientByteArray(
                 (short) 1, javacard.framework.JCSystem.{{if .StreamCleanupTracked}}CLEAR_ON_RESET{{else}}{{.StreamTransientEvent}}{{end}});
 {{end}}        this.digestScratch = digestScratch;
         this.scalars = scalars;
@@ -213,7 +238,7 @@ public final class {{.StreamRuntimeName}} implements {{.StreamEndpointName}} {
             throw failure;
         }
         clearAll();
-{{if .StreamWorkspacePersistent}}        resetMarker[0] = (byte) 1;
+{{if and .StreamWorkspacePersistent (not .StreamAuthenticated)}}        resetMarker[0] = (byte) 1;
 {{end}}    }
 
     @Override
@@ -238,7 +263,15 @@ public final class {{.StreamRuntimeName}} implements {{.StreamEndpointName}} {
             short responseCapacity,
             byte[] callerWorkspace,
             short callerWorkspaceOffset,
-            short callerWorkspaceCapacity) {
+            short callerWorkspaceCapacity{{if .StreamAuthenticated}},
+            boolean authenticated{{end}}) {
+{{- if .StreamAuthenticated}}
+        // Before authentication no stream byte may be staged in the persistent
+        // workspace: refuse before any session read, transient change or NVM store.
+        if (!authenticated) {
+            rejectWithoutClearing(SW_SECURITY_STATUS_NOT_SATISFIED);
+        }
+{{- end}}
         // Validate borrowed authority before reset cleanup or any session effect.
         if (callerWorkspace == null || callerWorkspaceOffset < 0 || callerWorkspaceCapacity < 0 ||
                 callerWorkspaceOffset > callerWorkspace.length ||
@@ -246,7 +279,7 @@ public final class {{.StreamRuntimeName}} implements {{.StreamEndpointName}} {
             rejectWithoutClearing(SW_WRONG_LENGTH);
         }
         try {
-{{if .StreamWorkspacePersistent}}            // Transient state is already empty after reset; clean retained NVM
+{{if and .StreamWorkspacePersistent (not .StreamAuthenticated)}}            // Transient state is already empty after reset; clean retained NVM
             // before any command can expose or reuse it, including stale reads.
             if (resetMarker[0] == 0) {
 {{if .StreamCleanupTracked}}                // Reset lost the transient write frontier; retain the full reset wipe.
@@ -355,7 +388,10 @@ public final class {{.StreamRuntimeName}} implements {{.StreamEndpointName}} {
                 (!responseEnabled &&
                         (shortResponseLength < (short) -1 ||
                                 shortResponseLength > SHORT_RESPONSE_CAPACITY)) ||
-                required > workspace.length) {
+                required > workspace.length{{if .StreamAuthenticated}} ||
+                // A streamed result would be produced into the persistent
+                // workspace on an APDU that may still be refused.
+                responseEnabled || !requestEnabled{{end}}) {
             fail(SW_NO_MEMORY);
         }
 
@@ -503,6 +539,32 @@ public final class {{.StreamRuntimeName}} implements {{.StreamEndpointName}} {
             byte[] callerWorkspace,
             short callerWorkspaceOffset,
             short callerWorkspaceCapacity) {
+{{- if .StreamAuthenticated}}
+        // Short results only (begin refuses streamed results). The handler
+        // writes into the caller's response span, preflighted for this width,
+        // so a failure or a rejected length leaves no persistent byte behind.
+        short outputCapacity = shortOutputCapacity();
+        short produced = ((Handler) handlerSlot[IDX_HANDLER]).execute(
+                (byte) scalars[IDX_ACTIVE_METHOD], input, inputOffset, inputSize,
+                response, responseOffset, outputCapacity,
+                callerWorkspace, callerWorkspaceOffset, callerWorkspaceCapacity);
+        if (produced < 0 || produced > outputCapacity ||
+                (scalars[IDX_EXACT_SHORT_RESPONSE_LENGTH] >= 0 &&
+                        produced != scalars[IDX_EXACT_SHORT_RESPONSE_LENGTH])) {
+            fail(SW_WRONG_LENGTH);
+        }
+
+        scalars[IDX_RESULT_LENGTH] = produced;
+        scalars[IDX_SHORT_RESULT_LENGTH] = produced;
+        if (preserveInputCloseReceipt) {
+            // Accepted: keep the public result for an identical CLOSE_WRITE retry.
+            copy(response, responseOffset, workspace, (short) 0, produced);
+            scalars[IDX_STATE] = STATE_SHORT_CLOSED;
+        } else {
+            clearAll();
+        }
+        return produced;
+{{- else}}
         short outputCapacity = hasResponseStream() ?
                 scalars[IDX_RESPONSE_MAX_LENGTH] : shortOutputCapacity();
 {{if .StreamCleanupTracked}}        // Mark before entering user code: scratch and exceptions are covered.
@@ -536,6 +598,7 @@ public final class {{.StreamRuntimeName}} implements {{.StreamEndpointName}} {
             clearAll();
         }
         return produced;
+{{- end}}
     }
 
     private short pendingInfo(byte[] response, short responseOffset, short responseCapacity) {
@@ -587,7 +650,7 @@ public final class {{.StreamRuntimeName}} implements {{.StreamEndpointName}} {
             fail(SW_INVALID_DATA);
         }
         if (scalars[IDX_STATE] == STATE_READ_PENDING) {
-            {{if .StreamCleanupTracked}}wipeWritten();{{else}}wipe(workspace);{{end}}
+            {{if .StreamAuthenticated}}// Invalidate only: retained public bytes are not erased.{{else if .StreamCleanupTracked}}wipeWritten();{{else}}wipe(workspace);{{end}}
             scalars[IDX_STATE] = STATE_READ_CLOSED;
         }
         return (short) 0;
@@ -693,13 +756,15 @@ public final class {{.StreamRuntimeName}} implements {{.StreamEndpointName}} {
     }
 
     /**
-{{if .StreamWorkspacePersistent}}     * Return to empty and explicitly overwrite the persistent workspace.
+{{if .StreamAuthenticated}}     * Invalidate the session: writes only transient arrays. Persistent
+     * workspace bytes are retained, unaddressed, until an accepted overwrite.
+{{else if .StreamWorkspacePersistent}}     * Return to empty and explicitly overwrite the persistent workspace.
      * Wiping is not transactional and may be interrupted by loss of power.
 {{else}}     * Return to the empty state. Writes only the injected transient arrays,
      * so the result is bit-identical to a freshly cleared transient array.
 {{end}}     */
     private void clearAll() {
-        {{if .StreamCleanupTracked}}wipeWritten();{{else}}wipe(workspace);{{end}}
+        {{if .StreamAuthenticated}}// Never writes the persistent workspace; see the class contract.{{else if .StreamCleanupTracked}}wipeWritten();{{else}}wipe(workspace);{{end}}
         wipe(digestScratch);
         for (short i = 0; i < SCALAR_COUNT; i++) {
             scalars[i] = (short) 0;
@@ -730,7 +795,8 @@ import javacard.framework.JCSystem;
 /**
  * Generated no-allocation short-APDU adapter for streamed instructions.
  * The owning Applet calls processIfStream() from process() and deselect() from
- * its deselect callback. Ordinary non-stream instructions remain on the legacy
+ * its deselect callback.{{if .StreamAuthenticated}} It passes authenticated for the current APDU;
+ * an unauthenticated stream APDU is refused before any session effect.{{end}} Ordinary non-stream instructions remain on the legacy
  * dispatch path.
  */
 public final class {{.StreamAPDUAdapterName}} {
@@ -745,7 +811,7 @@ public final class {{.StreamAPDUAdapterName}} {
                 IO_CAPACITY, JCSystem.{{.StreamTransientEvent}});
     }
 
-    public boolean processIfStream(APDU apdu) {
+    public boolean processIfStream(APDU apdu{{if .StreamAuthenticated}}, boolean authenticated{{end}}) {
         byte[] apduBuffer = apdu.getBuffer();
         byte ins = apduBuffer[ISO7816.OFFSET_INS];
         if (!logic.isStreamInstruction(ins)) {
@@ -790,7 +856,8 @@ public final class {{.StreamAPDUAdapterName}} {
                     IO_CAPACITY,
                     apduBuffer,
                     (short) 0,
-                    (short) apduBuffer.length);
+                    (short) apduBuffer.length{{if .StreamAuthenticated}},
+                    authenticated{{end}});
             if (outcome > 0) {
                 apdu.setOutgoing();
                 apdu.setOutgoingLength(outcome);
@@ -1129,7 +1196,21 @@ func buildJavaStreamDispatchSupport(data *javaTemplateData, methods []javaMethod
         return (short) -1;
     }
 `)
-	return b.String()
+	if !data.StreamAuthenticated {
+		return b.String()
+	}
+	// The applet states the authority of this exact APDU; the runtime refuses an
+	// unauthenticated stream APDU before any session or persistent effect.
+	return strings.NewReplacer(
+		"     * No borrowed scratch reference is stored in the skeleton or stream session.\n",
+		"     * No borrowed scratch reference is stored in the skeleton or stream session.\n"+
+			"     * authenticated states this APDU's card-side authority; persistent stream\n"+
+			"     * workspace is reachable only when it is true.\n",
+		"            short callerWorkspaceCapacity) {\n        short row = streamRow(ins);",
+		"            short callerWorkspaceCapacity,\n            boolean authenticated) {\n        short row = streamRow(ins);",
+		"                    callerWorkspace, callerWorkspaceOffset, callerWorkspaceCapacity);\n        } catch (",
+		"                    callerWorkspace, callerWorkspaceOffset, callerWorkspaceCapacity,\n                    authenticated);\n        } catch (",
+	).Replace(b.String())
 }
 
 // writeJavaByteRows prints count entries, four per line, indented as a Java array
