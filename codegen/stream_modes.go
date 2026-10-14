@@ -11,6 +11,7 @@ const (
 	// refused APDU and produces a streamed result into RAM on each read.
 	StreamModePublicInvalidate = render.StreamModePublicInvalidate
 	// StreamModeChunked delivers request chunks to the handler as they arrive and
-	// writes nothing persistent on any APDU. Short results only.
+	// writes nothing persistent on any APDU; a streamed result is produced into
+	// RAM on each read.
 	StreamModeChunked = render.StreamModeChunked
 )

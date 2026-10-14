@@ -19,7 +19,9 @@ const (
 	// StreamModeChunked delivers each accepted request chunk to the handler as
 	// it arrives, from the caller's request span. Nothing is staged, the request
 	// digest is computed incrementally, and no APDU of the method, accepted or
-	// refused, writes persistent memory. Short results only.
+	// refused, writes persistent memory. A short result is written into the
+	// admitted RAM response span; a streamed result is produced into it on each
+	// read, like the public producer, from handler-held state only.
 	StreamModeChunked = pluginapi.StreamModeChunked
 )
 
@@ -43,8 +45,8 @@ func javaStreamModeValue(mode string) byte {
 
 // validateStreamModes checks every per-method stream mode before any output is
 // rendered. A mode is meaningful only inside the authenticated-invalidate
-// runtime, only for a method with a request stream, and the chunked mode only
-// for a short result: an unknown or misplaced mode is refused, never ignored.
+// runtime and only for a method with a request stream: an unknown or misplaced
+// mode is refused, never ignored.
 func validateStreamModes(s *Schema, methods []javaMethodRender) error {
 	var errs []string
 	for _, method := range methods {
@@ -69,9 +71,6 @@ func validateStreamModes(s *Schema, methods []javaMethodRender) error {
 		if method.RequestStream == nil {
 			errs = append(errs, fmt.Sprintf("%s: stream mode %q requires a request stream", where, method.StreamMode))
 			continue
-		}
-		if method.StreamMode == StreamModeChunked && method.ResponseStream != nil {
-			errs = append(errs, fmt.Sprintf("%s: stream mode %q supports short results only; a streamed result needs %q", where, method.StreamMode, StreamModePublicInvalidate))
 		}
 	}
 	if len(errs) > 0 {
@@ -158,6 +157,8 @@ func buildJavaStreamMixedAbstractSupport(methods []javaMethodRender) string {
 	}
 	staged := func(m javaMethodRender) bool { return m.StreamMode != StreamModeChunked && m.ResponseStream == nil }
 	chunked := func(m javaMethodRender) bool { return m.StreamMode == StreamModeChunked }
+	chunkedShort := func(m javaMethodRender) bool { return chunked(m) && m.ResponseStream == nil }
+	chunkedProducer := func(m javaMethodRender) bool { return chunked(m) && m.ResponseStream != nil }
 	producer := func(m javaMethodRender) bool {
 		return m.StreamMode == StreamModePublicInvalidate && m.ResponseStream != nil
 	}
@@ -244,7 +245,7 @@ func buildJavaStreamMixedAbstractSupport(methods []javaMethodRender) string {
             short callerWorkspaceCapacity) {
         switch (methodId) {
 `)
-	cases(&b, chunked, func(name string) string {
+	cases(&b, chunkedShort, func(name string) string {
 		return fmt.Sprintf("                return on%sFinish(inputLength, output, outputOffset, outputCapacity,\n                        %s);\n", name, workspace)
 	})
 	b.WriteString(defaultCase)
@@ -260,7 +261,12 @@ func buildJavaStreamMixedAbstractSupport(methods []javaMethodRender) string {
             short callerWorkspaceCapacity) {
         switch (methodId) {
 `)
-	cases(&b, producer, func(name string) string {
+	cases(&b, func(m javaMethodRender) bool { return producer(m) || chunkedProducer(m) }, func(name string) string {
+		for _, m := range streamed {
+			if toPascal(m.Name) == name && chunkedProducer(m) {
+				return fmt.Sprintf("                return on%sPrepare(inputLength, %s);\n", name, workspace)
+			}
+		}
 		return fmt.Sprintf("                return on%sPrepare(input, inputOffset, inputLength, %s);\n", name, workspace)
 	})
 	b.WriteString(defaultCase)
@@ -280,7 +286,12 @@ func buildJavaStreamMixedAbstractSupport(methods []javaMethodRender) string {
             short callerWorkspaceCapacity) {
         switch (methodId) {
 `)
-	cases(&b, producer, func(name string) string {
+	cases(&b, func(m javaMethodRender) bool { return producer(m) || chunkedProducer(m) }, func(name string) string {
+		for _, m := range streamed {
+			if toPascal(m.Name) == name && chunkedProducer(m) {
+				return fmt.Sprintf("                on%sProduce(resultOffset, output, outputOffset, length,\n                        %s);\n                return;\n", name, workspace)
+			}
+		}
 		return fmt.Sprintf("                on%sProduce(input, inputOffset, inputLength, resultOffset,\n                        output, outputOffset, length, %s);\n                return;\n", name, workspace)
 	})
 	b.WriteString(`            default:
@@ -304,6 +315,18 @@ func buildJavaStreamMixedAbstractSupport(methods []javaMethodRender) string {
 			b.WriteString("            short packetIndex, short packetCount,\n")
 			b.WriteString("            byte[] chunk, short chunkOffset, short chunkLength,\n")
 			b.WriteString("            byte[] callerWorkspace, short callerWorkspaceOffset, short callerWorkspaceCapacity);\n\n")
+			if chunkedProducer(method) {
+				fmt.Fprintf(&b, "    /** %s, chunked streamed result: every chunk arrived and the digest matched; prepare the result from handler state and return its total length. */\n", method.Signature)
+				fmt.Fprintf(&b, "    protected abstract short on%sPrepare(\n", name)
+				b.WriteString("            short inputLength,\n")
+				b.WriteString("            byte[] callerWorkspace, short callerWorkspaceOffset, short callerWorkspaceCapacity);\n\n")
+				fmt.Fprintf(&b, "    /** %s, chunked streamed result: write the same bytes [resultOffset, resultOffset + length) every time. */\n", method.Signature)
+				fmt.Fprintf(&b, "    protected abstract void on%sProduce(\n", name)
+				b.WriteString("            short resultOffset,\n")
+				b.WriteString("            byte[] output, short outputOffset, short length,\n")
+				b.WriteString("            byte[] callerWorkspace, short callerWorkspaceOffset, short callerWorkspaceCapacity);\n\n")
+				continue
+			}
 			fmt.Fprintf(&b, "    /** %s, chunked: every chunk arrived and the digest matched; return response length. */\n", method.Signature)
 			fmt.Fprintf(&b, "    protected abstract short on%sFinish(\n", name)
 			b.WriteString("            short inputLength,\n")

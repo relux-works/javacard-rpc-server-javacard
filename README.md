@@ -63,7 +63,8 @@ nothing persistent, and response-stream methods are refused; see
 [authenticated workspace contract](AUTHENTICATED-INVALIDATE.md). Inside that
 runtime `Method.StreamMode` selects `public-invalidate` (unauthenticated
 staging, streamed results produced into RAM on each read) or `chunked` (chunks
-delivered to the handler as they arrive, no persistent write on any APDU); see
+delivered to the handler as they arrive, results produced into RAM, no
+persistent write on any APDU); see
 [per-method stream modes](STREAM-MODES.md). `written-bytes-only` is rejected; handlers keep the
 stream raw-array API. Empty cleanup preserves
 released bytes. See [cleanup contract and measured costs](PERSISTENT-WORKSPACE-COSTS.md)

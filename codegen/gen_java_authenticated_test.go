@@ -358,7 +358,7 @@ func TestAuthenticatedInvalidateGenerationNarrowingMutant(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	from, to := "if method.IsStream && method.ResponseStream != nil && method.StreamMode != StreamModePublicInvalidate {", "if method.IsStream && method.ResponseStream != nil && method.StreamMode != StreamModePublicInvalidate && method.INS != 0x70 {"
+	from, to := "if method.IsStream && method.ResponseStream != nil && method.StreamMode == \"\" {", "if method.IsStream && method.ResponseStream != nil && method.StreamMode == \"\" && method.INS != 0x70 {"
 	if strings.Count(string(source), from) != 1 {
 		t.Fatal("mutation anchor")
 	}

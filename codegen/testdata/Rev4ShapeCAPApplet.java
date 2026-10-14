@@ -56,12 +56,16 @@ public final class Rev4ShapeCAPApplet extends Applet {
         private final KeyPair keys;
         private final Signature signer;
         private final short[] parser;
+        private final byte[] signature;
+        private final byte[] certAdm;
 
         Logic() {
             super(null);
             keys = new KeyPair(KeyPair.ALG_EC_FP, KeyBuilder.LENGTH_EC_FP_256);
             signer = Signature.getInstance(Signature.ALG_ECDSA_SHA_256, false);
             parser = JCSystem.makeTransientShortArray((short) 1, JCSystem.CLEAR_ON_RESET);
+            signature = JCSystem.makeTransientByteArray((short) 73, JCSystem.CLEAR_ON_RESET);
+            certAdm = new byte[(short) 600];
         }
 
         protected byte onGetVersion(byte[] callerWorkspace, short callerWorkspaceOffset, short callerWorkspaceCapacity) {
@@ -106,15 +110,29 @@ public final class Rev4ShapeCAPApplet extends Applet {
             fill(input, inputOffset, inputLength, resultOffset, output, outputOffset, length);
         }
 
-        protected short onSignAdmissionPrepare(byte[] input, short inputOffset, short inputLength,
-                byte[] callerWorkspace, short callerWorkspaceOffset, short callerWorkspaceCapacity) {
-            return (short) (inputLength + 73);
+        protected void onSignAdmissionChunk(short packetIndex, short packetCount, byte[] chunk, short chunkOffset,
+                short chunkLength, byte[] callerWorkspace, short callerWorkspaceOffset, short callerWorkspaceCapacity) {
+            onSignTranscriptChunk(packetIndex, packetCount, chunk, chunkOffset, chunkLength,
+                    callerWorkspace, callerWorkspaceOffset, callerWorkspaceCapacity);
         }
 
-        protected void onSignAdmissionProduce(byte[] input, short inputOffset, short inputLength, short resultOffset,
-                byte[] output, short outputOffset, short length, byte[] callerWorkspace, short callerWorkspaceOffset,
-                short callerWorkspaceCapacity) {
-            fill(input, inputOffset, inputLength, resultOffset, output, outputOffset, length);
+        protected short onSignAdmissionPrepare(short inputLength,
+                byte[] callerWorkspace, short callerWorkspaceOffset, short callerWorkspaceCapacity) {
+            if (parser[0] != inputLength) failStream((short) 0x6A80);
+            short length = signer.sign(signature, (short) 0, (short) 0, signature, (short) 1);
+            signature[0] = (byte) length;
+            for (short i = (short) (length + 1); i < (short) 73; i++) {
+                signature[i] = 0;
+            }
+            return (short) (73 + certAdm.length);
+        }
+
+        protected void onSignAdmissionProduce(short resultOffset, byte[] output, short outputOffset, short length,
+                byte[] callerWorkspace, short callerWorkspaceOffset, short callerWorkspaceCapacity) {
+            for (short i = 0; i < length; i++) {
+                short at = (short) (resultOffset + i);
+                output[(short) (outputOffset + i)] = at < (short) 73 ? signature[at] : certAdm[(short) (at - 73)];
+            }
         }
 
         private short fill(byte[] input, short inputOffset, short inputLength, short resultOffset,

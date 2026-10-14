@@ -45,11 +45,12 @@ public class Rev4ShapeHarness {
             route = direct ? "direct" : "adapter";
             if (only.equals("all") || only.equals("chunked")) chunked();
             if (only.equals("all") || only.equals("public")) publicStreams();
+            if (only.equals("all") || only.equals("admission")) admissionStreams();
             if (only.equals("all") || only.equals("authority")) authority();
-            if (direct && (only.equals("all") || only.equals("admission"))) admission();
+            if (direct && (only.equals("all") || only.equals("spans"))) spanAdmission();
         }
         runtimeRefusals(session);
-        System.out.println("stream modes: chunked, public and authority controls green on adapter and direct routes");
+        System.out.println("stream modes: chunked signature, chunked admission, public envelope, authority and span controls green on adapter and direct routes");
     }
 
     // ---------------------------------------------------------------- chunked
@@ -184,34 +185,32 @@ public class Rev4ShapeHarness {
 
     // ----------------------------------------------------------------- public
 
+    // Option A, INS 0x10 only: accepted public chunks are staged; every refused
+    // APDU writes 0 B and kills the stream; the result is produced into RAM.
     static void publicStreams() throws Exception {
         reset();
         auth(false); // public methods are admitted without authentication
         byte[] in = chunk(320, 5);
         byte[] a = Arrays.copyOf(in, 192), b = Arrays.copyOfRange(in, 192, 320);
-        expect(0x9000, ADM, 0, 2, a, 192, "public accepted first chunk");
-        expect(0x9000, ADM, 1, 2, b, 128, "public accepted last chunk");
-        expect(0x9000, ADM, 1, 2, b, 0, "public identical duplicate wrote");
+        expect(0x9000, ENV, 0, 2, a, 192, "public accepted first chunk");
+        expect(0x9000, ENV, 1, 2, b, 128, "public accepted last chunk");
+        expect(0x9000, ENV, 1, 2, b, 0, "public identical duplicate wrote");
         int prepared = Rev4ShapeApplet.prepareCalls;
-        byte[] descriptor = expect(0x9000, ADM + CLOSE, 0, 0, close(in), 0, "public close wrote persistent");
+        byte[] descriptor = expect(0x9000, ENV + CLOSE, 0, 0, close(in), 0, "public close wrote persistent");
         if (Rev4ShapeApplet.prepareCalls != prepared + 1) throw new AssertionError("public result not prepared once");
-        int total = 73 + 4 * 320, packets = (total + 191) / 192;
-        checkDescriptor(descriptor, total, packets, "public descriptor");
-        if (!Arrays.equals(descriptor, expect(0x9000, ADM + INFO, 0, 0, EMPTY, 0, "public info wrote persistent")))
+        checkDescriptor(descriptor, 320, 2, "public descriptor");
+        if (!Arrays.equals(descriptor, expect(0x9000, ENV + INFO, 0, 0, EMPTY, 0, "public info wrote persistent")))
             throw new AssertionError("public info differs from the close descriptor");
-        byte[] result = readAll(ADM, packets, "public read wrote persistent");
+        byte[] result = readAll(ENV, 2, "public read wrote persistent");
         checkResult(descriptor, result, "public read does not match the descriptor");
-        for (int at = 73; at < total; at++) {
-            int body = at - 73;
-            if (result[at] != (byte) (in[body % 320] ^ body ^ (body >> 8))) throw new AssertionError("public result bytes");
-        }
-        if (!Arrays.equals(Arrays.copyOfRange(result, 3 * 192, 4 * 192), expect(0x9000, ADM + READ, 3, packets, EMPTY, 0, "public read retry wrote persistent")))
+        checkEnvelope(in, result, "public result bytes");
+        if (!Arrays.equals(Arrays.copyOfRange(result, 192, 320), expect(0x9000, ENV + READ, 1, 2, EMPTY, 0, "public read retry wrote persistent")))
             throw new AssertionError("public read retry differs");
-        expect(0x9000, ADM + CLOSE_READ, 0, 0, close(result), 0, "public close read wrote persistent");
-        expect(0x9000, ADM + CLOSE_READ, 0, 0, close(result), 0, "public close read retry wrote persistent");
-        expect(0x6985, ADM + READ, 0, packets, EMPTY, 0, "public read after close read wrote persistent");
+        expect(0x9000, ENV + CLOSE_READ, 0, 0, close(result), 0, "public close read wrote persistent");
+        expect(0x9000, ENV + CLOSE_READ, 0, 0, close(result), 0, "public close read retry wrote persistent");
+        expect(0x6985, ENV + READ, 0, 2, EMPTY, 0, "public read after close read wrote persistent");
 
-        // Bounds: 1792 B upload and 1792 B result through the envelope method.
+        // Bounds: 1792 B upload and 1792 B result.
         byte[] env = chunk(1792, 7);
         for (int i = 0; i < 10; i++) {
             byte[] p = part(env, i);
@@ -221,107 +220,238 @@ public class Rev4ShapeHarness {
         checkDescriptor(envDescriptor, 1792, 10, "public bounded descriptor");
         byte[] envResult = readAll(ENV, 10, "public bounded read wrote persistent");
         checkResult(envDescriptor, envResult, "public bounded read does not match the descriptor");
-        for (int at = 0; at < 1792; at++) {
-            if (envResult[at] != (byte) (env[at] ^ 0x5A ^ at)) throw new AssertionError("public bounded result bytes");
-        }
-        expect(0x9000, ENV + CLOSE_READ, 0, 0, close(envResult), 0, "public bounded close read wrote persistent");
+        checkEnvelope(env, envResult, "public bounded result bytes");
+        // A WRITE while the result is pending is refused and kills the result.
+        expect(0x6A80, ENV, 0, 2, a, 0, "public write during pending read wrote persistent");
+        expect(0x6985, ENV + CLOSE_READ, 0, 0, close(envResult), 0, "public pending read refusal retained live handle");
         expect(0x6700, ENV, 0, 11, part(env, 0), 0, "public oversized declaration wrote persistent");
-        // Declared result maximum: exactly 1408 B is accepted.
+        // Declared result maximum: exactly 1792 B from a 320 B upload.
         Rev4ShapeApplet.control = 9;
         publicUpload(in, "public maximum result control");
-        byte[] maxDescriptor = expect(0x9000, ADM + CLOSE, 0, 0, close(in), 0, "public maximum result wrote persistent");
-        checkDescriptor(maxDescriptor, 1408, 8, "public maximum descriptor");
-        byte[] maxResult = readAll(ADM, 8, "public maximum read wrote persistent");
-        checkResult(maxDescriptor, maxResult, "public maximum read");
+        byte[] maxDescriptor = expect(0x9000, ENV + CLOSE, 0, 0, close(in), 0, "public maximum result wrote persistent");
+        checkDescriptor(maxDescriptor, 1792, 10, "public maximum descriptor");
+        checkResult(maxDescriptor, readAll(ENV, 10, "public maximum read wrote persistent"), "public maximum read");
         Rev4ShapeApplet.control = 0;
-        // A WRITE while the result is pending is refused and kills the result.
-        expect(0x6A80, ADM, 0, 2, a, 0, "public write during pending read wrote persistent");
-        expect(0x6985, ADM + CLOSE_READ, 0, 0, close(maxResult), 0, "public pending read refusal retained live handle");
+        expect(0x9000, ENV + ABORT, 0, 0, EMPTY, 0, "public abort after maximum result");
 
         // Upload refusals: 0 B, and the stream is dead afterwards.
         publicFirst(a);
         byte[] changed = a.clone();
         changed[7] ^= 1;
-        expect(0x6A80, ADM, 0, 2, changed, 0, "public changed duplicate wrote persistent");
-        expect(0x6A80, ADM, 1, 2, b, 0, "public changed duplicate retained live handle");
+        expect(0x6A80, ENV, 0, 2, changed, 0, "public changed duplicate wrote persistent");
+        expect(0x6A80, ENV, 1, 2, b, 0, "public changed duplicate retained live handle");
         expect(0x9000, ENV, 0, 3, part(env, 0), 192, "public order control");
         expect(0x6A80, ENV, 2, 3, part(env, 2), 0, "public out-of-order chunk wrote persistent");
         expect(0x6A80, ENV, 1, 3, part(env, 1), 0, "public order refusal retained live handle");
-        expect(0x6700, ADM, 0, 2, Arrays.copyOf(a, 100), 0, "public short middle chunk wrote persistent");
+        expect(0x6700, ENV, 0, 2, Arrays.copyOf(a, 100), 0, "public short middle chunk wrote persistent");
         publicUpload(in, "public close length control");
         byte[] wrongLength = close(in);
         wrongLength[1] ^= 1;
-        expect(0x6700, ADM + CLOSE, 0, 0, wrongLength, 0, "public close length wrote persistent");
-        expect(0x6985, ADM + CLOSE, 0, 0, close(in), 0, "public close length retained live handle");
+        expect(0x6700, ENV + CLOSE, 0, 0, wrongLength, 0, "public close length wrote persistent");
+        expect(0x6985, ENV + CLOSE, 0, 0, close(in), 0, "public close length retained live handle");
         publicUpload(in, "public close digest control");
         byte[] wrongDigest = close(in);
         wrongDigest[20] ^= 1;
-        expect(0x6A80, ADM + CLOSE, 0, 0, wrongDigest, 0, "public bad close digest wrote persistent");
-        expect(0x6985, ADM + CLOSE, 0, 0, close(in), 0, "public bad digest retained live handle");
+        expect(0x6A80, ENV + CLOSE, 0, 0, wrongDigest, 0, "public bad close digest wrote persistent");
+        expect(0x6985, ENV + CLOSE, 0, 0, close(in), 0, "public bad digest retained live handle");
         publicFirst(a);
-        expect(0x9000, ADM + ABORT, 0, 0, EMPTY, 0, "public abort wrote persistent");
-        expect(0x6A80, ADM, 1, 2, b, 0, "public abort retained live handle");
+        expect(0x9000, ENV + ABORT, 0, 0, EMPTY, 0, "public abort wrote persistent");
+        expect(0x6A80, ENV, 1, 2, b, 0, "public abort retained live handle");
         publicFirst(a);
         simulator.reset();
         simulator.selectApplet(aid);
-        expect(0x6A80, ADM, 1, 2, b, 0, "public post-reset retry wrote persistent");
-        expect(0x6985, ADM + CLOSE, 0, 0, close(in), 0, "public post-reset close wrote persistent");
+        expect(0x6A80, ENV, 1, 2, b, 0, "public post-reset retry wrote persistent");
+        expect(0x6985, ENV + CLOSE, 0, 0, close(in), 0, "public post-reset close wrote persistent");
         publicFirst(a);
         NvmLedger.reset();
         simulator.selectApplet(other);
         simulator.selectApplet(aid);
         if (NvmLedger.persistent != 0) throw new AssertionError(route + ": public deselect wrote persistent");
-        expect(0x6A80, ADM, 1, 2, b, 0, "public deselect retained live handle");
+        expect(0x6A80, ENV, 1, 2, b, 0, "public deselect retained live handle");
         publicFirst(a);
         expect(0x6985, SIGN + CLOSE, 0, 0, close(in), 0, "public foreign method wrote persistent");
-        expect(0x6A80, ADM, 1, 2, b, 0, "public foreign refusal retained live handle");
+        expect(0x6A80, ENV, 1, 2, b, 0, "public foreign refusal retained live handle");
         publicFirst(a);
         expect(0x6985, SIGN, 0, 2, Arrays.copyOf(transcript(194), 192), 0, "public foreign write wrote persistent");
-        expect(0x6A80, ADM, 1, 2, b, 0, "public foreign write retained live handle");
+        expect(0x6A80, ENV, 1, 2, b, 0, "public foreign write retained live handle");
 
         // Result refusals at CLOSE: prepare failure, invalid totals, producer failure.
         for (int[] c : new int[][] {{5, 0x6A80}, {6, 0x6700}, {7, 0x6700}}) {
             Rev4ShapeApplet.control = c[0];
             publicUpload(in, "public prepare control " + c[0]);
-            expect(c[1], ADM + CLOSE, 0, 0, close(in), 0, "public prepare refusal " + c[0] + " wrote persistent");
-            expect(0x6985, ADM + INFO, 0, 0, EMPTY, 0, "public prepare refusal " + c[0] + " retained live handle");
+            expect(c[1], ENV + CLOSE, 0, 0, close(in), 0, "public prepare refusal " + c[0] + " wrote persistent");
+            expect(0x6985, ENV + INFO, 0, 0, EMPTY, 0, "public prepare refusal " + c[0] + " retained live handle");
         }
         Rev4ShapeApplet.control = 0;
         Rev4ShapeApplet.failProduceAt = 2;
-        publicUpload(in, "public digest pass failure control");
-        expect(0x6F00, ADM + CLOSE, 0, 0, close(in), 0, "public digest pass failure wrote persistent");
-        expect(0x6985, ADM + INFO, 0, 0, EMPTY, 0, "public digest pass failure retained live handle");
+        expect(0x9000, ENV, 0, 3, part(env, 0), 192, "public digest pass failure control");
+        expect(0x9000, ENV, 1, 3, part(env, 1), 192, "public digest pass failure control");
+        expect(0x9000, ENV, 2, 3, part(env, 2), 192, "public digest pass failure control");
+        expect(0x6F00, ENV + CLOSE, 0, 0, close(Arrays.copyOf(env, 576)), 0, "public digest pass failure wrote persistent");
+        expect(0x6985, ENV + INFO, 0, 0, EMPTY, 0, "public digest pass failure retained live handle");
+        Rev4ShapeApplet.failProduceAt = 0;
+        // The engine was left mid-digest by that refusal; a staged CLOSE must not inherit it.
+        publicUpload(in, "public close after digest pass failure control");
+        expect(0x9000, ENV + CLOSE, 0, 0, close(in), 0, "public close after digest pass failure");
+        expect(0x9000, ENV + ABORT, 0, 0, EMPTY, 0, "public abort after digest control");
 
         // Read refusals: 0 B, and the result handle is dead afterwards.
-        Rev4ShapeApplet.failProduceAt = packets + 2;
-        publicUpload(in, "public read failure control");
-        expect(0x9000, ADM + CLOSE, 0, 0, close(in), 0, "public read failure close");
-        expect(0x9000, ADM + READ, 0, packets, EMPTY, 0, "public read before failure");
-        expect(0x6F00, ADM + READ, 1, packets, EMPTY, 0, "public read failure wrote persistent");
+        Rev4ShapeApplet.failProduceAt = 2 + 2;
+        publicClosed(in, "public read failure control");
+        expect(0x9000, ENV + READ, 0, 2, EMPTY, 0, "public read before failure");
+        expect(0x6F00, ENV + READ, 1, 2, EMPTY, 0, "public read failure wrote persistent");
         Rev4ShapeApplet.failProduceAt = 0;
-        expect(0x6985, ADM + READ, 1, packets, EMPTY, 0, "public read failure retained live handle");
-        publicClosed(in, packets, "public bad read index control");
-        expect(0x6A80, ADM + READ, packets, packets, EMPTY, 0, "public bad read index wrote persistent");
-        expect(0x6985, ADM + READ, 0, packets, EMPTY, 0, "public bad read index retained live handle");
-        publicClosed(in, packets, "public bad read count control");
-        expect(0x6A80, ADM + READ, 0, packets + 1, EMPTY, 0, "public bad read count wrote persistent");
-        expect(0x6985, ADM + INFO, 0, 0, EMPTY, 0, "public bad read count retained live handle");
-        byte[] d2 = publicClosed(in, packets, "public bad close read control");
-        byte[] r2 = readAll(ADM, packets, "public read before bad close read");
+        expect(0x6985, ENV + READ, 1, 2, EMPTY, 0, "public read failure retained live handle");
+        publicClosed(in, "public bad read index control");
+        expect(0x6A80, ENV + READ, 2, 2, EMPTY, 0, "public bad read index wrote persistent");
+        expect(0x6985, ENV + READ, 0, 2, EMPTY, 0, "public bad read index retained live handle");
+        publicClosed(in, "public bad read count control");
+        expect(0x6A80, ENV + READ, 0, 3, EMPTY, 0, "public bad read count wrote persistent");
+        expect(0x6985, ENV + INFO, 0, 0, EMPTY, 0, "public bad read count retained live handle");
+        publicClosed(in, "public bad close read control");
+        byte[] r2 = readAll(ENV, 2, "public read before bad close read");
         byte[] badCloseRead = close(r2);
         badCloseRead[9] ^= 1;
-        expect(0x6A80, ADM + CLOSE_READ, 0, 0, badCloseRead, 0, "public bad close read wrote persistent");
-        expect(0x6985, ADM + READ, 0, packets, EMPTY, 0, "public bad close read retained live handle");
+        expect(0x6A80, ENV + CLOSE_READ, 0, 0, badCloseRead, 0, "public bad close read wrote persistent");
+        expect(0x6985, ENV + READ, 0, 2, EMPTY, 0, "public bad close read retained live handle");
 
         // A producer that is not deterministic is caught by the host digest check.
         Rev4ShapeApplet.control = 8;
-        byte[] d3 = publicClosed(in, packets, "public drifting producer control");
-        byte[] drifted = readAll(ADM, packets, "public drifting read wrote persistent");
+        Rev4ShapeApplet.driftAfter = 2;
+        byte[] d3 = publicClosed(in, "public drifting producer control");
+        byte[] drifted = readAll(ENV, 2, "public drifting read wrote persistent");
         if (Arrays.equals(digest(drifted), Arrays.copyOfRange(d3, 3, 35))) throw new AssertionError("host did not detect a drifting producer");
         Rev4ShapeApplet.control = 0;
-        expect(0x6A80, ADM + CLOSE_READ, 0, 0, close(drifted), 0, "drifting result close read wrote persistent");
+        expect(0x6A80, ENV + CLOSE_READ, 0, 0, close(drifted), 0, "drifting result close read wrote persistent");
     }
 
+    // -------------------------------------------------------------- admission
+
+    // INS 0x70 is chunked: the transcript is never staged, and the result,
+    // signature || Cert_adm, is produced into RAM from the held signature and
+    // the persistent Cert_adm record read in place. Every APDU writes 0 B.
+    static void admissionStreams() throws Exception {
+        reset();
+        auth(false);
+        byte[] t = transcript(320);
+        byte[] a = Arrays.copyOf(t, 192), b = Arrays.copyOfRange(t, 192, 320);
+        byte[] before = workspace.clone();
+        int calls = Rev4ShapeApplet.chunkCalls;
+        expect(0x9000, ADM, 0, 2, a, 0, "admission first chunk wrote persistent");
+        expect(0x9000, ADM, 1, 2, b, 0, "admission last chunk wrote persistent");
+        byte[] descriptor = expect(0x9000, ADM + CLOSE, 0, 0, close(t), 0, "admission close wrote persistent");
+        int total = 73 + Rev4ShapeApplet.certLength, packets = (total + 191) / 192;
+        checkDescriptor(descriptor, total, packets, "admission descriptor");
+        if (!Arrays.equals(descriptor, expect(0x9000, ADM + INFO, 0, 0, EMPTY, 0, "admission info wrote persistent")))
+            throw new AssertionError("admission info differs from the close descriptor");
+        byte[] result = readAll(ADM, packets, "admission read wrote persistent");
+        checkResult(descriptor, result, "admission read does not match the descriptor");
+        checkAdmission(t, result, "admission result is not signature || Cert_adm");
+        if (!Arrays.equals(Arrays.copyOf(result, 192), expect(0x9000, ADM + READ, 0, packets, EMPTY, 0, "admission read retry wrote persistent")))
+            throw new AssertionError("admission read retry differs");
+        expect(0x9000, ADM + CLOSE_READ, 0, 0, close(result), 0, "admission close read wrote persistent");
+        expect(0x9000, ADM + CLOSE_READ, 0, 0, close(result), 0, "admission close read retry wrote persistent");
+        if (!Arrays.equals(before, workspace)) throw new AssertionError("admission session staged the request or the result");
+        if (Rev4ShapeApplet.chunkCalls - calls != 2) throw new AssertionError("admission handler did not receive each chunk once");
+        expect(0x6985, ADM + CLOSE, 0, 0, close(t), 0, "admission close retry wrote persistent");
+
+        // Declared result maximum: 73 B signature + 1335 B Cert_adm = 1408 B.
+        Rev4ShapeApplet.control = 9;
+        admissionUpload(t, "admission maximum result control");
+        byte[] maxDescriptor = expect(0x9000, ADM + CLOSE, 0, 0, close(t), 0, "admission maximum result wrote persistent");
+        checkDescriptor(maxDescriptor, 1408, 8, "admission maximum descriptor");
+        byte[] maxResult = readAll(ADM, 8, "admission maximum read wrote persistent");
+        checkResult(maxDescriptor, maxResult, "admission maximum read");
+        checkAdmission(t, maxResult, "admission maximum result is not signature || Cert_adm");
+        Rev4ShapeApplet.control = 0;
+        expect(0x9000, ADM + ABORT, 0, 0, EMPTY, 0, "admission abort after maximum result");
+
+        // Upload refusals: nothing is staged, so every repeat is refused too.
+        expect(0x9000, ADM, 0, 2, a, 0, "admission duplicate control");
+        expect(0x6A80, ADM, 0, 2, a, 0, "admission identical duplicate wrote persistent");
+        expect(0x6A80, ADM, 1, 2, b, 0, "admission duplicate refusal retained live handle");
+        expect(0x9000, ADM, 0, 2, a, 0, "admission changed duplicate control");
+        byte[] changed = a.clone();
+        changed[50] ^= 1;
+        expect(0x6A80, ADM, 0, 2, changed, 0, "admission changed duplicate wrote persistent");
+        expect(0x6985, ADM + CLOSE, 0, 0, close(t), 0, "admission changed duplicate retained live handle");
+        expect(0x6A80, ADM, 1, 2, b, 0, "admission out-of-order first packet wrote persistent");
+        expect(0x6700, ADM, 0, 3, a, 0, "admission oversized declaration wrote persistent");
+        expect(0x6700, ADM, 0, 2, Arrays.copyOf(a, 100), 0, "admission short middle chunk wrote persistent");
+        admissionUpload(t, "admission close digest control");
+        byte[] wrongDigest = close(t);
+        wrongDigest[30] ^= 1;
+        expect(0x6A80, ADM + CLOSE, 0, 0, wrongDigest, 0, "admission bad close digest wrote persistent");
+        expect(0x6985, ADM + CLOSE, 0, 0, close(t), 0, "admission bad digest retained live handle");
+        admissionUpload(t, "admission close length control");
+        byte[] wrongLength = close(t);
+        wrongLength[1] ^= 1;
+        expect(0x6700, ADM + CLOSE, 0, 0, wrongLength, 0, "admission close length wrote persistent");
+        expect(0x9000, ADM, 0, 2, a, 0, "admission early close control");
+        expect(0x6985, ADM + CLOSE, 0, 0, close(t), 0, "admission early close wrote persistent");
+        expect(0x9000, ADM, 0, 2, a, 0, "admission abort control");
+        expect(0x9000, ADM + ABORT, 0, 0, EMPTY, 0, "admission abort wrote persistent");
+        expect(0x6A80, ADM, 1, 2, b, 0, "admission abort retained live handle");
+        expect(0x9000, ADM, 0, 2, a, 0, "admission reset control");
+        simulator.reset();
+        simulator.selectApplet(aid);
+        expect(0x6985, ADM + CLOSE, 0, 0, close(t), 0, "admission post-reset close wrote persistent");
+        expect(0x6A80, ADM, 1, 2, b, 0, "admission post-reset retry wrote persistent");
+        expect(0x9000, ADM, 0, 2, a, 0, "admission deselect control");
+        NvmLedger.reset();
+        simulator.selectApplet(other);
+        simulator.selectApplet(aid);
+        if (NvmLedger.persistent != 0) throw new AssertionError(route + ": admission deselect wrote persistent");
+        expect(0x6A80, ADM, 1, 2, b, 0, "admission deselect retained live handle");
+        expect(0x9000, ADM, 0, 2, a, 0, "admission foreign control");
+        expect(0x6985, ENV + READ, 0, 1, EMPTY, 0, "admission foreign method wrote persistent");
+        expect(0x6A80, ADM, 1, 2, b, 0, "admission foreign refusal retained live handle");
+
+        // Handler refusals: parser, missing key, prepare failure, invalid totals.
+        byte[] badTag = t.clone();
+        badTag[0] = 0x55;
+        expect(0x6A80, ADM, 0, 2, Arrays.copyOf(badTag, 192), 0, "admission parser refusal wrote persistent");
+        expect(0x6A80, ADM, 1, 2, b, 0, "admission parser refusal retained live handle");
+        Rev4ShapeApplet.control = 4;
+        expect(0x6A88, ADM, 0, 2, a, 0, "admission missing signing key wrote persistent");
+        Rev4ShapeApplet.control = 0;
+        byte[] lying = t.clone();
+        lying[2] ^= 1;
+        admissionUpload(lying, "admission transcript length control");
+        expect(0x6A80, ADM + CLOSE, 0, 0, close(lying), 0, "admission transcript length refusal wrote persistent");
+        for (int[] c : new int[][] {{5, 0x6A80}, {6, 0x6700}, {7, 0x6700}}) {
+            Rev4ShapeApplet.control = c[0];
+            admissionUpload(t, "admission prepare control " + c[0]);
+            expect(c[1], ADM + CLOSE, 0, 0, close(t), 0, "admission prepare refusal " + c[0] + " wrote persistent");
+            expect(0x6985, ADM + INFO, 0, 0, EMPTY, 0, "admission prepare refusal " + c[0] + " retained live handle");
+        }
+        Rev4ShapeApplet.control = 0;
+        Rev4ShapeApplet.failProduceAt = 2;
+        admissionUpload(t, "admission digest pass failure control");
+        expect(0x6F00, ADM + CLOSE, 0, 0, close(t), 0, "admission digest pass failure wrote persistent");
+        expect(0x6985, ADM + INFO, 0, 0, EMPTY, 0, "admission digest pass failure retained live handle");
+        Rev4ShapeApplet.failProduceAt = packets + 2;
+        admissionUpload(t, "admission read failure control");
+        expect(0x9000, ADM + CLOSE, 0, 0, close(t), 0, "admission read failure close");
+        expect(0x9000, ADM + READ, 0, packets, EMPTY, 0, "admission read before failure");
+        expect(0x6F00, ADM + READ, 1, packets, EMPTY, 0, "admission read failure wrote persistent");
+        Rev4ShapeApplet.failProduceAt = 0;
+        expect(0x6985, ADM + READ, 1, packets, EMPTY, 0, "admission read failure retained live handle");
+        admissionUpload(t, "admission bad read index control");
+        expect(0x9000, ADM + CLOSE, 0, 0, close(t), 0, "admission bad read index close");
+        expect(0x6A80, ADM + READ, packets, packets, EMPTY, 0, "admission bad read index wrote persistent");
+        expect(0x6985, ADM + READ, 0, packets, EMPTY, 0, "admission bad read index retained live handle");
+
+        // A drifting producer is caught by the host digest check.
+        Rev4ShapeApplet.control = 8;
+        Rev4ShapeApplet.driftAfter = packets;
+        admissionUpload(t, "admission drifting producer control");
+        byte[] d3 = expect(0x9000, ADM + CLOSE, 0, 0, close(t), 0, "admission drifting close");
+        byte[] drifted = readAll(ADM, packets, "admission drifting read wrote persistent");
+        if (Arrays.equals(digest(drifted), Arrays.copyOfRange(d3, 3, 35))) throw new AssertionError("host did not detect a drifting admission producer");
+        Rev4ShapeApplet.control = 0;
+        expect(0x6A80, ADM + CLOSE_READ, 0, 0, close(drifted), 0, "admission drifting close read wrote persistent");
+    }
     // -------------------------------------------------------------- authority
 
     static void authority() throws Exception {
@@ -336,7 +466,7 @@ public class Rev4ShapeHarness {
         // No unauthenticated APDU of any method can cancel or join the live upload.
         auth(false);
         byte[] in = chunk(320, 5);
-        expect(0x6982, ADM, 0, 2, Arrays.copyOf(in, 192), 0, "unauthenticated public write cancelled issuer upload");
+        expect(0x6982, ENV, 0, 2, Arrays.copyOf(in, 192), 0, "unauthenticated public write cancelled issuer upload");
         expect(0x6982, SIGN, 0, 2, Arrays.copyOf(transcript(194), 192), 0, "unauthenticated chunked write cancelled issuer upload");
         expect(0x6982, ADM + ABORT, 0, 0, EMPTY, 0, "unauthenticated abort cancelled issuer upload");
         expect(0x6982, PUT + CLOSE, 0, 0, close(leaf), 0, "unauthenticated issuer close");
@@ -349,7 +479,7 @@ public class Rev4ShapeHarness {
         expect(0x9000, PUT + CLOSE, 0, 0, close(leaf), 0, "issuer close retry wrote");
         // F2 in the mode runtime: an authenticated foreign APDU kills the issuer upload.
         expect(0x9000, PUT, 0, 2, a, 192, "issuer foreign control");
-        expect(0x6985, ADM, 0, 2, Arrays.copyOf(in, 192), 0, "issuer foreign write wrote persistent");
+        expect(0x6985, ENV, 0, 2, Arrays.copyOf(in, 192), 0, "issuer foreign write wrote persistent");
         expect(0x6A80, PUT, 1, 2, b, 0, "issuer foreign refusal retained live handle");
         // A finished issuer session does not block a public caller.
         auth(false);
@@ -359,14 +489,14 @@ public class Rev4ShapeHarness {
         auth(true);
         expect(0x6985, PUT + CLOSE, 0, 0, close(leaf), 0, "authenticated foreign refusal wrote persistent");
         auth(false);
-        expect(0x6A80, ADM, 1, 2, Arrays.copyOfRange(in, 192, 320), 0, "authenticated foreign refusal retained public handle");
+        expect(0x6A80, ENV, 1, 2, Arrays.copyOfRange(in, 192, 320), 0, "authenticated foreign refusal retained public handle");
     }
 
     // -------------------------------------------------------------- admission
 
     // Direct route: the caller chooses the arrays. A persistent output or caller
     // workspace is refused before any handler callback; RAM spans are accepted.
-    static void admission() throws Exception {
+    static void spanAdmission() throws Exception {
         reset();
         auth(false);
         byte[] t = transcript(194);
@@ -390,29 +520,55 @@ public class Rev4ShapeHarness {
         Rev4ShapeApplet.output = 0;
 
         byte[] in = chunk(320, 5);
-        int packets = (73 + 4 * 320 + 191) / 192;
+        int packets = 2;
         for (int span : new int[] {1, 2}) {
             String kind = span == 1 ? "persistent response" : "persistent caller workspace";
             publicUpload(in, kind + " public control");
             int prepared = Rev4ShapeApplet.prepareCalls;
             Rev4ShapeApplet.output = span;
-            expect(0x6985, ADM + CLOSE, 0, 0, close(in), 0, kind + " admitted on public close");
+            expect(0x6985, ENV + CLOSE, 0, 0, close(in), 0, kind + " admitted on public close");
             Rev4ShapeApplet.output = 0;
             if (Rev4ShapeApplet.prepareCalls != prepared) throw new AssertionError(kind + " admitted on public close: handler ran");
-            expect(0x6985, ADM + CLOSE, 0, 0, close(in), 0, kind + " public refusal retained live handle");
+            expect(0x6985, ENV + CLOSE, 0, 0, close(in), 0, kind + " public refusal retained live handle");
         }
-        publicClosed(in, packets, "persistent read span control");
+        publicClosed(in, "persistent read span control");
         int produced = Rev4ShapeApplet.produceCalls;
         Rev4ShapeApplet.output = 1;
-        expect(0x6985, ADM + READ, 0, packets, EMPTY, 0, "persistent read span admitted");
+        expect(0x6985, ENV + READ, 0, packets, EMPTY, 0, "persistent read span admitted");
         Rev4ShapeApplet.output = 0;
         if (Rev4ShapeApplet.produceCalls != produced) throw new AssertionError("persistent read span admitted: handler ran");
-        expect(0x6985, ADM + READ, 0, packets, EMPTY, 0, "persistent read refusal retained live handle");
-        publicClosed(in, packets, "persistent descriptor span control");
+        expect(0x6985, ENV + READ, 0, packets, EMPTY, 0, "persistent read refusal retained live handle");
+        publicClosed(in, "persistent descriptor span control");
         Rev4ShapeApplet.output = 1;
-        expect(0x6985, ADM + INFO, 0, 0, EMPTY, 0, "persistent descriptor span admitted");
+        expect(0x6985, ENV + INFO, 0, 0, EMPTY, 0, "persistent descriptor span admitted");
         Rev4ShapeApplet.output = 0;
-        expect(0x6985, ADM + INFO, 0, 0, EMPTY, 0, "persistent descriptor refusal retained live handle");
+        expect(0x6985, ENV + INFO, 0, 0, EMPTY, 0, "persistent descriptor refusal retained live handle");
+        // Chunked admission result: the same admission at CLOSE and READ.
+        byte[] adm = transcript(320);
+        admissionUpload(adm, "chunked result admission control");
+        int preparedAdm = Rev4ShapeApplet.prepareCalls;
+        Rev4ShapeApplet.output = 1;
+        expect(0x6985, ADM + CLOSE, 0, 0, close(adm), 0, "persistent response admitted on admission close");
+        Rev4ShapeApplet.output = 0;
+        if (Rev4ShapeApplet.prepareCalls != preparedAdm) throw new AssertionError("persistent response admitted on admission close: handler ran");
+        expect(0x6985, ADM + CLOSE, 0, 0, close(adm), 0, "admission close refusal retained live handle");
+        int admPackets = (73 + Rev4ShapeApplet.certLength + 191) / 192;
+        admissionUpload(adm, "chunked read admission control");
+        expect(0x9000, ADM + CLOSE, 0, 0, close(adm), 0, "chunked read admission close");
+        int producedAdm = Rev4ShapeApplet.produceCalls;
+        Rev4ShapeApplet.output = 1;
+        expect(0x6985, ADM + READ, 1, admPackets, EMPTY, 0, "persistent read span admitted on admission");
+        Rev4ShapeApplet.output = 0;
+        if (Rev4ShapeApplet.produceCalls != producedAdm) throw new AssertionError("persistent read span admitted on admission: handler ran");
+        expect(0x6985, ADM + READ, 1, admPackets, EMPTY, 0, "admission read refusal retained live handle");
+        // Transient response span: the whole admission flow is accepted.
+        Rev4ShapeApplet.output = 3;
+        admissionUpload(adm, "transient admission response control");
+        byte[] admD = expect(0x9000, ADM + CLOSE, 0, 0, close(adm), 0, "transient admission close wrote persistent");
+        checkAdmission(adm, readAll(ADM, admPackets, "transient admission read wrote persistent"), "transient admission result");
+        Rev4ShapeApplet.output = 0;
+        checkDescriptor(admD, 73 + Rev4ShapeApplet.certLength, admPackets, "transient admission descriptor");
+        expect(0x9000, ADM + ABORT, 0, 0, EMPTY, 0, "admission abort after transient control");
         // F1 in the mode runtime: a persistent issuer response is refused before the handler.
         byte[] leaf = chunk(197, 9);
         auth(true);
@@ -427,22 +583,22 @@ public class Rev4ShapeHarness {
         auth(false);
         // Transient response span: the whole public flow is accepted.
         Rev4ShapeApplet.output = 3;
-        byte[] d = publicClosed(in, packets, "transient public response control");
-        checkResult(d, readAll(ADM, packets, "transient public read wrote persistent"), "transient public read");
+        byte[] d = publicClosed(in, "transient public response control");
+        checkResult(d, readAll(ENV, packets, "transient public read wrote persistent"), "transient public read");
         Rev4ShapeApplet.output = 0;
     }
 
     // ------------------------------------------------------- runtime refusals
 
-    // Direct runtime calls: begin refuses a streamed result outside the public
-    // mode, an unknown mode and a missing request stream before any effect; a
+    // Direct runtime calls: begin refuses a streamed result for an authenticated
+    // method, an unknown mode and a missing request stream before any effect; a
     // valid chunked call is the accepted control.
     static void runtimeRefusals(Object session) {
         reset();
         Rev4ShapeStreamEndpoint endpoint = (Rev4ShapeStreamEndpoint) session;
         byte[] io = JCSystem.makeTransientByteArray((short) 255, JCSystem.CLEAR_ON_RESET);
         Object[][] cases = {
-            {"chunked streamed result admitted", Rev4ShapeStreamEndpoint.MODE_CHUNKED, true, true},
+            {"chunked method without request stream admitted", Rev4ShapeStreamEndpoint.MODE_CHUNKED, false, true},
             {"authenticated streamed result admitted", Rev4ShapeStreamEndpoint.MODE_AUTHENTICATED, true, true},
             {"unknown stream mode admitted", (byte) 3, true, false},
             {"public method without request stream admitted", Rev4ShapeStreamEndpoint.MODE_PUBLIC_INVALIDATE, false, true},
@@ -507,19 +663,41 @@ public class Rev4ShapeHarness {
     }
 
     static void publicFirst(byte[] a) {
-        expect(0x9000, ADM, 0, 2, a, 192, "public first chunk control");
+        expect(0x9000, ENV, 0, 2, a, 192, "public first chunk control");
     }
 
     static void publicUpload(byte[] in, String label) {
-        expect(0x9000, ADM, 0, 2, Arrays.copyOf(in, 192), 192, label);
-        expect(0x9000, ADM, 1, 2, Arrays.copyOfRange(in, 192, 320), 128, label);
+        expect(0x9000, ENV, 0, 2, Arrays.copyOf(in, 192), 192, label);
+        expect(0x9000, ENV, 1, 2, Arrays.copyOfRange(in, 192, 320), 128, label);
     }
 
-    static byte[] publicClosed(byte[] in, int packets, String label) {
+    static byte[] publicClosed(byte[] in, String label) {
         publicUpload(in, label);
-        byte[] d = expect(0x9000, ADM + CLOSE, 0, 0, close(in), 0, label + " close");
-        checkDescriptor(d, 73 + 4 * 320, packets, label);
+        byte[] d = expect(0x9000, ENV + CLOSE, 0, 0, close(in), 0, label + " close");
+        checkDescriptor(d, 320, 2, label);
         return d;
+    }
+
+    static void admissionUpload(byte[] t, String label) {
+        expect(0x9000, ADM, 0, 2, Arrays.copyOf(t, 192), 0, label);
+        expect(0x9000, ADM, 1, 2, Arrays.copyOfRange(t, 192, t.length), 0, label);
+    }
+
+    // Envelope result: a deterministic transform of the staged request.
+    static void checkEnvelope(byte[] in, byte[] result, String label) {
+        for (int at = 0; at < result.length; at++) {
+            if (result[at] != (byte) (in[at % in.length] ^ 0x5A ^ at)) throw new AssertionError(label);
+        }
+    }
+
+    // Admission result: the 73 B signature record over the whole transcript,
+    // then the Cert_adm record bytes as stored.
+    static void checkAdmission(byte[] transcript, byte[] result, String label) {
+        verify(Arrays.copyOf(result, 73), transcript, label);
+        byte[] cert = Rev4ShapeApplet.installed.logic.certAdm;
+        for (int i = 73; i < result.length; i++) {
+            if (result[i] != cert[i - 73]) throw new AssertionError(label + ": Cert_adm byte " + (i - 73));
+        }
     }
 
     static byte[] readAll(int family, int packets, String label) {

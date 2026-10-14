@@ -24,8 +24,10 @@ two more contracts; see [per-method stream modes](STREAM-MODES.md):
   response span, once for the result digest and again on every READ_CHUNK.
 - `chunked` delivers each accepted chunk from the caller's request span to the
   handler and a running digest, so no APDU of the method, accepted or refused,
-  writes persistent memory. Short results only; repeated chunks and CLOSE
-  retries after success are refused because nothing is staged.
+  writes persistent memory. A short result goes into the admitted RAM span; a
+  streamed result is produced into it on every read from handler-held state and
+  read-only records. Repeated chunks and CLOSE retries after success are
+  refused because nothing is staged.
 
 An unauthenticated APDU of any method cannot cancel or join a live
 authenticated upload. Schemas without a mode generate the same files as the
@@ -56,7 +58,7 @@ regression witnesses, one
 token-preserving mutant, one generation-time Go mutant, allocation payload and
 Classic 3.0.5u4 CAP conversion with off-card verification. The modes add their
 own jCardSim scenario with real ECDSA over chunked transcripts, ledger controls
-on refusal, chunked-success and producer-read paths, twenty-six behavioral
+on refusal, chunked-success and producer-read paths, thirty-one behavioral
 narrowing mutants, one token-preserving mutant, two generation-time Go mutants,
 the allocation payload of the full Auth fixture and CAP conversion. Physical-card
 behavior, JCRE/native writes (including Signature and MessageDigest state) and

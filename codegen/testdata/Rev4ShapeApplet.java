@@ -5,9 +5,10 @@ import javacard.security.*;
 
 /**
  * Test fixture for the per-method stream modes. Handlers model the Auth
- * shapes: a chunked ECDSA signature over an incrementally parsed transcript,
- * an authenticated issuer upload, and two public streamed results produced
- * into RAM. Every array element store is reported to NvmLedger, classified by
+ * shapes: chunked ECDSA signatures over an incrementally parsed transcript
+ * (INS 0x20 short, INS 0x70 with a signature + Cert_adm streamed result), an
+ * authenticated issuer upload, and a public option-A streamed result (INS
+ * 0x10), all results produced into RAM. Every array element store is reported to NvmLedger, classified by
  * array identity; Signature and MessageDigest internal state are not visible
  * to the ledger.
  */
@@ -26,6 +27,10 @@ public final class Rev4ShapeApplet extends Applet {
     static int output = 0;
     static int chunkCalls = 0, maxChunk = 0, finishCalls = 0, prepareCalls = 0, produceCalls = 0, stagedCalls = 0;
     static boolean chunkFromPersistent = false;
+    // Admission Cert_adm length and the producer call after which a drifting
+    // producer changes its bytes.
+    static short certLength = 600;
+    static int driftAfter = 8;
 
     final Logic logic = new Logic();
     final Rev4ShapeStreamAPDUAdapter adapter = new Rev4ShapeStreamAPDUAdapter(logic);
@@ -83,26 +88,57 @@ public final class Rev4ShapeApplet extends Applet {
         // Transcript: tag 0x54, u16 body length, body. Parser state is RAM:
         // [0] header bytes seen, [1] declared body length, [2] body bytes seen.
         static final byte TRANSCRIPT_TAG = (byte) 0x54;
+        static final short CERT_ADM_CAPACITY = 1335;
         final short[] parser = JCSystem.makeTransientShortArray((short) 3, JCSystem.CLEAR_ON_RESET);
         final KeyPair keys = new KeyPair(KeyPair.ALG_EC_FP, KeyBuilder.LENGTH_EC_FP_256);
         final Signature signer = Signature.getInstance(Signature.ALG_ECDSA_SHA_256, false);
-        // Handler-owned RAM for a randomized result prefix, as a signature would be.
-        final byte[] prefix = JCSystem.makeTransientByteArray((short) 73, JCSystem.CLEAR_ON_RESET);
-        final RandomData random = RandomData.getInstance(RandomData.ALG_SECURE_RANDOM);
+        // Admission result state held between CLOSE_WRITE and the reads: the
+        // 73 B signature record, in RAM, as a randomized ECDSA signature must be.
+        final byte[] admissionSignature = JCSystem.makeTransientByteArray((short) 73, JCSystem.CLEAR_ON_RESET);
+        // Cert_adm evidence: a persistent record written once at install, as the
+        // Auth 0x0011 record is; producers only read it.
+        final byte[] certAdm = new byte[CERT_ADM_CAPACITY];
 
         Logic() {
             super(null);
             keys.genKeyPair();
+            for (short i = 0; i < CERT_ADM_CAPACITY; i++) {
+                certAdm[i] = (byte) (0x30 + i * 13);
+            }
         }
 
         protected byte onGetVersion(byte[] w, short wo, short wc) {
             return 1;
         }
 
-        // --- chunked signature -------------------------------------------------
+        // --- chunked signature (INS 0x20) ------------------------------------
 
         protected void onSignTranscriptChunk(short packetIndex, short packetCount,
                 byte[] chunk, short chunkOffset, short chunkLength, byte[] w, short wo, short wc) {
+            consumeTranscript(packetIndex, chunk, chunkOffset, chunkLength);
+        }
+
+        protected short onSignTranscriptFinish(short inputLength, byte[] output, short outputOffset, short outputCapacity,
+                byte[] w, short wo, short wc) {
+            finishCalls++;
+            requireWholeTranscript(inputLength);
+            short length = signer.sign(output, outputOffset, (short) 0, output, (short) (outputOffset + 1));
+            // The native signer wrote length bytes into output.
+            for (short i = 0; i < length; i++) {
+                NvmLedger.store(output);
+            }
+            NvmLedger.store(output);
+            output[outputOffset] = (byte) length;
+            for (short i = (short) (length + 1); i < 73; i++) {
+                NvmLedger.store(output);
+                output[(short) (outputOffset + i)] = 0;
+            }
+            if (control == 1) failStream((short) 0x6985);
+            return control == 2 ? (short) 74 : (short) 73;
+        }
+
+        /** Incremental transcript parser feeding Signature.update; RAM state only. */
+        private void consumeTranscript(short packetIndex, byte[] chunk, short chunkOffset, short chunkLength) {
             chunkCalls++;
             if (chunkLength > maxChunk) maxChunk = chunkLength;
             if (JCSystem.isTransient(chunk) == JCSystem.NOT_A_TRANSIENT_OBJECT && chunk != NvmLedger.apdu) {
@@ -138,25 +174,10 @@ public final class Rev4ShapeApplet extends Applet {
             signer.update(chunk, chunkOffset, chunkLength);
         }
 
-        protected short onSignTranscriptFinish(short inputLength, byte[] output, short outputOffset, short outputCapacity,
-                byte[] w, short wo, short wc) {
-            finishCalls++;
+        private void requireWholeTranscript(short inputLength) {
             if (parser[0] != 3 || parser[2] != parser[1] || (short) (parser[2] + 3) != inputLength) {
                 failStream((short) 0x6A80);
             }
-            short length = signer.sign(output, outputOffset, (short) 0, output, (short) (outputOffset + 1));
-            // The native signer wrote length bytes into output.
-            for (short i = 0; i < length; i++) {
-                NvmLedger.store(output);
-            }
-            NvmLedger.store(output);
-            output[outputOffset] = (byte) length;
-            for (short i = (short) (length + 1); i < 73; i++) {
-                NvmLedger.store(output);
-                output[(short) (outputOffset + i)] = 0;
-            }
-            if (control == 1) failStream((short) 0x6985);
-            return control == 2 ? (short) 74 : (short) 73;
         }
 
         // --- authenticated issuer upload ----------------------------------------
@@ -175,11 +196,15 @@ public final class Rev4ShapeApplet extends Applet {
             return 36;
         }
 
-        // --- public streamed results ---------------------------------------------
+        // --- public streamed result (option A, INS 0x10) -------------------------
 
         protected short onBuildEnvelopePrepare(byte[] input, short io, short il, byte[] w, short wo, short wc) {
             prepareCalls++;
             produceCalls = 0;
+            if (control == 5) failStream((short) 0x6A80);
+            if (control == 6) return (short) 1793;
+            if (control == 7) return (short) 0;
+            if (control == 9) return (short) 1792;
             return il;
         }
 
@@ -188,40 +213,54 @@ public final class Rev4ShapeApplet extends Applet {
             produce();
             for (short i = 0; i < length; i++) {
                 short at = (short) (resultOffset + i);
+                byte value = (byte) (input[(short) (io + (short) (at % il))] ^ 0x5A ^ at);
+                // A drifting producer returns different bytes on reads.
+                if (control == 8 && produceCalls > driftAfter) value = (byte) ~value;
                 NvmLedger.store(output);
-                output[(short) (oo + i)] = (byte) (input[(short) (io + at)] ^ 0x5A ^ at);
+                output[(short) (oo + i)] = value;
             }
         }
 
-        protected short onSignAdmissionPrepare(byte[] input, short io, short il, byte[] w, short wo, short wc) {
+        // --- chunked admission with a streamed result (INS 0x70) ---------------
+
+        protected void onSignAdmissionChunk(short packetIndex, short packetCount,
+                byte[] chunk, short chunkOffset, short chunkLength, byte[] w, short wo, short wc) {
+            consumeTranscript(packetIndex, chunk, chunkOffset, chunkLength);
+        }
+
+        protected short onSignAdmissionPrepare(short inputLength, byte[] w, short wo, short wc) {
             prepareCalls++;
             produceCalls = 0;
             if (control == 5) failStream((short) 0x6A80);
-            NvmLedger.store(prefix);
-            random.generateData(prefix, (short) 0, (short) 73);
+            requireWholeTranscript(inputLength);
+            // The 73 B signature record is the only result state; it stays in RAM.
+            short length = signer.sign(admissionSignature, (short) 0, (short) 0, admissionSignature, (short) 1);
+            for (short i = 0; i < length; i++) {
+                NvmLedger.store(admissionSignature);
+            }
+            NvmLedger.store(admissionSignature);
+            admissionSignature[0] = (byte) length;
+            for (short i = (short) (length + 1); i < 73; i++) {
+                NvmLedger.store(admissionSignature);
+                admissionSignature[i] = 0;
+            }
             if (control == 6) return (short) 1409;
             if (control == 7) return (short) 0;
-            if (control == 9) return (short) 1408;
-            return (short) (73 + 4 * il);
+            return (short) (73 + (control == 9 ? (short) CERT_ADM_CAPACITY : certLength));
         }
 
-        protected void onSignAdmissionProduce(byte[] input, short io, short il, short resultOffset,
-                byte[] output, short oo, short length, byte[] w, short wo, short wc) {
+        protected void onSignAdmissionProduce(short resultOffset, byte[] output, short oo, short length,
+                byte[] w, short wo, short wc) {
             produce();
             for (short i = 0; i < length; i++) {
                 short at = (short) (resultOffset + i);
+                // Signature from RAM, then Cert_adm read straight from its
+                // persistent record: no staging copy of either.
+                byte value = at < 73 ? admissionSignature[at] : certAdm[(short) (at - 73)];
+                if (control == 8 && produceCalls > driftAfter) value = (byte) ~value;
                 NvmLedger.store(output);
-                output[(short) (oo + i)] = admissionByte(input, io, il, at);
+                output[(short) (oo + i)] = value;
             }
-        }
-
-        private byte admissionByte(byte[] input, short io, short il, short at) {
-            if (at < 73) {
-                // A drifting producer returns different prefix bytes on reads.
-                return control == 8 && produceCalls > 8 ? (byte) ~prefix[at] : prefix[at];
-            }
-            short body = (short) (at - 73);
-            return (byte) (input[(short) (io + (short) (body % il))] ^ body ^ (body >> 8));
         }
 
         private void produce() {

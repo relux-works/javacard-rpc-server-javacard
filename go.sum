@@ -2,3 +2,5 @@ github.com/relux-works/javacard-rpc/pluginapi v0.1.1 h1:cNvoCdRTp88tLTIli+zk391j
 github.com/relux-works/javacard-rpc/pluginapi v0.1.1/go.mod h1:vini/jA9xID/u2iYwtKViPacEvP9nLIapL3RdQV7RBc=
 github.com/relux-works/javacard-rpc/pluginapi v0.1.2-0.20261014214040-2d009196fe38 h1:5CAWgxuj/NCzHw8CHAawg8ZDYbN73wRnCPYs6G5fL70=
 github.com/relux-works/javacard-rpc/pluginapi v0.1.2-0.20261014214040-2d009196fe38/go.mod h1:vini/jA9xID/u2iYwtKViPacEvP9nLIapL3RdQV7RBc=
+github.com/relux-works/javacard-rpc/pluginapi v0.1.2-0.20261014223732-4e10e2cfd254 h1:H4lp/V3q34HDvIid0xZNghs/7P3VaVvZ3fNVUHhoohs=
+github.com/relux-works/javacard-rpc/pluginapi v0.1.2-0.20261014223732-4e10e2cfd254/go.mod h1:vini/jA9xID/u2iYwtKViPacEvP9nLIapL3RdQV7RBc=

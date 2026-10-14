@@ -128,9 +128,9 @@ public interface {{.StreamEndpointName}} {
                 short callerWorkspaceCapacity);
 
         /**
-         * MODE_CHUNKED: every chunk was delivered and the request digest
-         * matched. Write the short result into the admitted RAM output span and
-         * return its length under the same rules as execute.
+         * MODE_CHUNKED short result: every chunk was delivered and the request
+         * digest matched. Write the short result into the admitted RAM output span
+         * and return its length under the same rules as execute.
          */
         short finishChunks(
                 byte methodId,
@@ -143,9 +143,10 @@ public interface {{.StreamEndpointName}} {
                 short callerWorkspaceCapacity);
 
         /**
-         * MODE_PUBLIC_INVALIDATE streamed result: prepare it from the accepted
-         * input and return its total length, 1..the declared maximum. Keep any
-         * state the result needs in RAM; input is read-only.
+         * Streamed result (MODE_PUBLIC_INVALIDATE or MODE_CHUNKED): prepare it and
+         * return its total length, 1..the declared maximum. Keep any state the
+         * result needs in RAM. input is the read-only staged request, or null for
+         * MODE_CHUNKED, which stages nothing.
          */
         short prepareResult(
                 byte methodId,
@@ -157,7 +158,7 @@ public interface {{.StreamEndpointName}} {
                 short callerWorkspaceCapacity);
 
         /**
-         * MODE_PUBLIC_INVALIDATE streamed result: write result bytes
+         * Streamed result: write result bytes
          * [resultOffset, resultOffset + length) into the admitted RAM output span.
          * Called once per chunk while CLOSE_WRITE computes the result digest and
          * again for every READ_CHUNK, so the bytes must be identical every time
@@ -244,7 +245,8 @@ const javaStreamRuntimeTemplate = `package {{.PackageName}};
  * response span, once for the result digest and again on every READ_CHUNK.
  * MODE_CHUNKED stages nothing: each accepted chunk goes from the caller's
  * request span to the handler and a running digest, so no APDU of that method,
- * accepted or refused, writes persistent memory. A repeated chunk cannot be
+ * accepted or refused, writes persistent memory; a streamed result goes through
+ * the same RAM producer, from handler-held state only. A repeated chunk cannot be
  * compared with a staged copy and is refused; no receipt is kept for a CLOSE
  * retry. An unauthenticated APDU never changes a live authenticated upload.
 {{- end}}
@@ -500,9 +502,13 @@ public final class {{.StreamRuntimeName}} implements {{.StreamEndpointName}} {
             short shortResponseLength,
             Handler handler) {
         short required = requestEnabled ? requestLimit : (short) 0;
-        if ({{if .StreamMixed}}methodMode != MODE_PUBLIC_INVALIDATE && {{end}}responseEnabled && responseLimit > required) {
+{{- if .StreamMixed}}
+        // A streamed result is produced into RAM on demand, never staged.
+{{- else}}
+        if (responseEnabled && responseLimit > required) {
             required = responseLimit;
         }
+{{- end}}
         short shortCapacity = shortResponseLength >= 0 ?
                 shortResponseLength : SHORT_RESPONSE_CAPACITY;
         if (!responseEnabled && required < shortCapacity) {
@@ -522,10 +528,10 @@ public final class {{.StreamRuntimeName}} implements {{.StreamEndpointName}} {
                         (shortResponseLength < (short) -1 ||
                                 shortResponseLength > SHORT_RESPONSE_CAPACITY)) ||
                 required > workspace.length{{if .StreamMixed}} ||
-                // Every mode needs a request stream. Only a public method may
-                // stream its result, and only through the RAM producer.
+                // Every mode needs a request stream. Only a public or chunked
+                // method may stream its result, and only through the RAM producer.
                 !requestEnabled ||
-                (responseEnabled && methodMode != MODE_PUBLIC_INVALIDATE) ||
+                (responseEnabled && methodMode == MODE_AUTHENTICATED) ||
                 (methodMode != MODE_AUTHENTICATED && methodMode != MODE_PUBLIC_INVALIDATE &&
                         methodMode != MODE_CHUNKED){{else if .StreamAuthenticated}} ||
                 // A streamed result would be produced into the persistent
@@ -710,7 +716,8 @@ public final class {{.StreamRuntimeName}} implements {{.StreamEndpointName}} {
     /**
      * MODE_CHUNKED CLOSE_WRITE: finish the running digest over the delivered
      * chunks, then let the handler write its short result into the admitted RAM
-     * response span. No receipt is kept, so a CLOSE retry is refused.
+     * response span, or prepare a streamed result for the RAM producer. No
+     * receipt is kept, so a CLOSE retry is refused.
      */
     private short finishChunks(
             byte[] request,
@@ -725,6 +732,10 @@ public final class {{.StreamRuntimeName}} implements {{.StreamEndpointName}} {
         sha256.digest(request, digestOffset, (short) 0, digestScratch, (short) 0);
         if (!equalsRange(digestScratch, (short) 0, request, digestOffset, DIGEST_LENGTH)) {
             fail(SW_INVALID_DATA);
+        }
+        if (hasResponseStream()) {
+            return prepareStreamedResult(response, responseOffset, responseCapacity,
+                    callerWorkspace, callerWorkspaceOffset, callerWorkspaceCapacity);
         }
         short outputCapacity = shortOutputCapacity();
         short produced = ((Handler) handlerSlot[IDX_HANDLER]).finishChunks(
@@ -741,10 +752,10 @@ public final class {{.StreamRuntimeName}} implements {{.StreamEndpointName}} {
     }
 
     /**
-     * MODE_PUBLIC_INVALIDATE CLOSE_WRITE with a streamed result: the handler
-     * prepares the result, then produces it chunk by chunk into the admitted RAM
-     * response span only to digest it. The result is never stored; READ_CHUNK
-     * produces each chunk again. The descriptor is written last.
+     * CLOSE_WRITE with a streamed result (MODE_PUBLIC_INVALIDATE or MODE_CHUNKED):
+     * the handler prepares the result, then produces it chunk by chunk into the
+     * admitted RAM response span only to digest it. The result is never stored;
+     * READ_CHUNK produces each chunk again. The descriptor is written last.
      */
     private short prepareStreamedResult(
             byte[] response,
@@ -758,7 +769,7 @@ public final class {{.StreamRuntimeName}} implements {{.StreamEndpointName}} {
                 chunkSize > DESCRIPTOR_LENGTH ? chunkSize : DESCRIPTOR_LENGTH);
         Handler handler = (Handler) handlerSlot[IDX_HANDLER];
         byte method = (byte) scalars[IDX_ACTIVE_METHOD];
-        short total = handler.prepareResult(method, workspace, (short) 0, scalars[IDX_INPUT_LENGTH],
+        short total = handler.prepareResult(method, stagedInput(), (short) 0, scalars[IDX_INPUT_LENGTH],
                 callerWorkspace, callerWorkspaceOffset, callerWorkspaceCapacity);
         if (total <= 0 || total > scalars[IDX_RESPONSE_MAX_LENGTH]) {
             fail(SW_WRONG_LENGTH);
@@ -770,7 +781,7 @@ public final class {{.StreamRuntimeName}} implements {{.StreamEndpointName}} {
             if (length > chunkSize) {
                 length = chunkSize;
             }
-            handler.produceResult(method, workspace, (short) 0, scalars[IDX_INPUT_LENGTH],
+            handler.produceResult(method, stagedInput(), (short) 0, scalars[IDX_INPUT_LENGTH],
                     offset, response, responseOffset, length,
                     callerWorkspace, callerWorkspaceOffset, callerWorkspaceCapacity);
             sha256.updateDigest(response, responseOffset, length);
@@ -781,6 +792,11 @@ public final class {{.StreamRuntimeName}} implements {{.StreamEndpointName}} {
         scalars[IDX_RESULT_PACKET_COUNT] = (short) ((total + chunkSize - 1) / chunkSize);
         scalars[IDX_STATE] = STATE_READ_PENDING;
         return writeDescriptor(response, responseOffset, responseCapacity);
+    }
+
+    /** The staged request a producer may read: none for MODE_CHUNKED. */
+    private byte[] stagedInput() {
+        return scalars[IDX_METHOD_MODE] == MODE_CHUNKED ? null : workspace;
     }
 {{- end}}
 
@@ -900,7 +916,7 @@ public final class {{.StreamRuntimeName}} implements {{.StreamEndpointName}} {
         // Produce the chunk again into the admitted RAM span; it is never stored.
         requireNonPersistentOutput(response, callerWorkspace);
         ((Handler) handlerSlot[IDX_HANDLER]).produceResult(
-                (byte) scalars[IDX_ACTIVE_METHOD], workspace, (short) 0, scalars[IDX_INPUT_LENGTH],
+                (byte) scalars[IDX_ACTIVE_METHOD], stagedInput(), (short) 0, scalars[IDX_INPUT_LENGTH],
                 (short) offset, response, responseOffset, (short) length,
                 callerWorkspace, callerWorkspaceOffset, callerWorkspaceCapacity);
 {{- else}}

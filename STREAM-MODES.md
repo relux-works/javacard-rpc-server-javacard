@@ -10,21 +10,24 @@ pinned by `TestStreamModesKeepAuthenticatedOutput`.
 | --- | --- | --- | --- | --- |
 | none (authenticated) | required per APDU | staged in the persistent workspace | short, staged in the caller's RAM span, receipt copied after validation | accepted chunks and the accepted receipt only |
 | `public-invalidate` | not required | staged in the persistent workspace | short as above, or streamed: produced into RAM on every read, never stored | accepted chunks (and a short receipt) only |
-| `chunked` | not required | never staged: each chunk goes to the handler and a running digest | short, written by the handler into the caller's RAM span | none, on any APDU |
+| `chunked` | not required | never staged: each chunk goes to the handler and a running digest | short, written by the handler into the caller's RAM span, or streamed: produced into RAM on every read from handler-held state and read-only records, never stored | none, on any APDU |
+
+REV4 Auth assignment (owner decision; Auth adoption is downstream work):
+provisioning INS 0x10 is `public-invalidate`; signatures INS 0x20/0x30/0x40
+and admission INS 0x70 are `chunked`; issuer methods keep no mode.
 
 ## Selection and refusals
 
 A mode requires `stream_workspace = "persistent"`,
 `stream_workspace_cleanup = "authenticated-invalidate"` and a request stream.
-`chunked` supports short results only. Without `public-invalidate`, a method
-with a response stream is refused as before. Unknown values, a mode on an
+A method without a mode and with a response stream is refused as before. Unknown values, a mode on an
 ordinary method or under another cleanup selector are refused by name, and no
 file is returned. The facade repeats these checks before generation.
 
 The generated `STREAM_MODES` table gives each streamed method its mode and the
 skeleton passes it to `dispatch(..., methodMode, ...)`. The runtime rechecks the
-combination in `begin` and refuses an unknown mode, a streamed result outside
-`public-invalidate` and a method without a request stream with `6A84` before
+combination in `begin` and refuses an unknown mode, a streamed result of a
+method without a mode and a method without a request stream with `6A84` before
 any effect.
 
 ## Authority
@@ -99,8 +102,11 @@ array, or the current APDU buffer while the selected applet processes its APDU.
 | Handler refusal or failure on a chunk | 0 | session invalidated |
 | CLOSE_WRITE before the last chunk, wrong length or digest | 0 | session invalidated |
 | CLOSE_WRITE with a non-RAM response span or caller workspace | 0; `6985` before the handler | session invalidated |
-| Accepted CLOSE_WRITE | 0; short result in the RAM response span | session ends; no receipt |
-| Handler failure at finish, result length rejected | 0 | session invalidated |
+| Accepted CLOSE_WRITE, short result | 0; result in the RAM response span | session ends; no receipt |
+| Accepted CLOSE_WRITE, streamed result | 0; descriptor in the RAM response span | result pending |
+| Handler failure at finish or prepare, result length rejected, producer failure | 0 | session invalidated |
+| GET_PENDING_READ_INFO, READ_CHUNK, CLOSE_READ and their retries | 0; output only into a proven RAM span | as for `public-invalidate` |
+| READ with bad index or count, producer failure, non-RAM span, bad CLOSE_READ | 0 | session invalidated |
 | CLOSE_WRITE retry after success | 0; `6985` | none |
 | ABORT, deselect, reset | 0 | session gone |
 
@@ -110,8 +116,15 @@ Handler callbacks:
 protected abstract void on<Method>Chunk(short packetIndex, short packetCount,
         byte[] chunk, short chunkOffset, short chunkLength,
         byte[] callerWorkspace, short callerWorkspaceOffset, short callerWorkspaceCapacity);
+// short result
 protected abstract short on<Method>Finish(short inputLength,
         byte[] output, short outputOffset, short outputCapacity,
+        byte[] callerWorkspace, short callerWorkspaceOffset, short callerWorkspaceCapacity);
+// streamed result
+protected abstract short on<Method>Prepare(short inputLength,
+        byte[] callerWorkspace, short callerWorkspaceOffset, short callerWorkspaceCapacity);
+protected abstract void on<Method>Produce(short resultOffset,
+        byte[] output, short outputOffset, short length,
         byte[] callerWorkspace, short callerWorkspaceOffset, short callerWorkspaceCapacity);
 ```
 
@@ -122,6 +135,15 @@ with a small RAM state machine. `Finish` runs only after every chunk arrived
 and the runtime's running SHA-256 matched the CLOSE digest; it writes the
 short result (for Auth, the single 73 B `signatureLength || signatureDerPadded`)
 into the admitted RAM response span.
+
+A chunked streamed result has no staged input: `Prepare` runs after the digest
+matched, keeps what the result needs in handler RAM and returns the total
+length; `Produce` then writes result bytes into the admitted RAM span for the
+result digest and on every READ_CHUNK, under the same determinism contract as
+the public producer. For Auth admission (INS 0x70) that is the 73 B signature
+record held in RAM from `Prepare`, followed by Cert_adm evidence read in place
+from its persistent record (AUTH 0x0011): no staging copy of the transcript,
+the signature or the certificate.
 
 Two choices follow from staging nothing:
 
@@ -148,7 +170,9 @@ array identity; same-value stores count. Fixture `Rev4Shape`
 | --- | ---: |
 | Chunked ECDSA over a 194 B transcript (2 chunks) + 73 B response | 0 B on every APDU |
 | Chunked ECDSA over 2048 B (11 chunks) + 73 B response | 0 B on every APDU |
-| Public 320 B upload, 1353 B streamed result (8 reads), CLOSE_READ | 320 B (upload only) |
+| Chunked admission: ECDSA over a 320 B transcript, result signature + 600 B Cert_adm (673 B, 4 reads) | 0 B on every APDU |
+| Chunked admission at the 1408 B result maximum (signature + 1335 B Cert_adm, 8 reads) | 0 B on every APDU |
+| Public 320 B upload, 320 B streamed result (2 reads), CLOSE_READ | 320 B (upload only) |
 | Public 1792 B upload, 1792 B streamed result (10 reads) | 1792 B (upload only) |
 | Issuer 197 B upload + 36 B receipt | 233 B |
 | Every refusal, ABORT, deselect, reset, read retry, CLOSE_READ retry | 0 B each |
@@ -188,7 +212,7 @@ payload, not a card total.
 `codegen/gen_java_stream_modes_test.go`:
 
 - `TestStreamModeValidation`, `TestStreamModeGenerationNarrowingMutants` (two
-  Go mutants, each admitting INS 0x70 in one refused class);
+  Go mutants, each admitting one INS in one refused class);
 - `TestStreamModesKeepAuthenticatedOutput` (L2 and released Auth outputs
   byte-identical, with a positive control);
 - `TestStreamModesSourceContract` and `TestStreamModesTokenPreservingMutant`;
@@ -197,7 +221,7 @@ payload, not a card total.
   a refusal path, directly and through an alias, on the accepted chunked path
   and on an accepted producer read is caught by name; a transient plant stays
   green);
-- `TestStreamModesNarrowingMutants` (26 behavioral mutants, each keeping its
+- `TestStreamModesNarrowingMutants` (31 behavioral mutants, each keeping its
   guard and admitting one member of the refused class);
 - `TestStreamModesAllocationPayload` and `TestStreamModesClassicCAP` (Classic
   3.0.5u4 conversion with a fixture using every callback and `Signature.update`).

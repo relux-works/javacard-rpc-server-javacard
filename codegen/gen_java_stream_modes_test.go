@@ -14,10 +14,11 @@ import (
 )
 
 // rev4ShapeSchema mirrors the Auth applet's three stream classes in one
-// applet: a public streamed-result provisioning call (INS 0x10) and admission
-// call (INS 0x70), a zero-NVM chunked signature (INS 0x20, exact 73 B result)
-// and an authenticated issuer upload (INS 0x58, exact 36 B result). It is a
-// fixture, not the Auth contract.
+// applet: a public option-A provisioning call with a streamed result (INS
+// 0x10), zero-NVM chunked signatures with an exact 73 B result (INS 0x20) and
+// with a signature + Cert_adm streamed result (INS 0x70, 320 B transcript,
+// 1408 B result), and an authenticated issuer upload (INS 0x58, exact 36 B
+// result). It is a fixture, not the Auth contract.
 func rev4ShapeSchema() *Schema {
 	stream := func(max int) *Message {
 		return &Message{Fields: []Field{{Name: "packet", Type: FieldTypeStream, MaxLength: max, ChunkSize: 192}}}
@@ -33,7 +34,7 @@ func rev4ShapeSchema() *Schema {
 				{Name: "signatureLength", Type: FieldTypeU8}, {Name: "signature", Type: FieldTypeBytesFixed, FixedLength: 72}}}},
 			"putLeaf": {Name: "putLeaf", INS: 0x58, Request: stream(2048), Response: &Message{Fields: []Field{
 				{Name: "generation", Type: FieldTypeU32}, {Name: "digest", Type: FieldTypeBytesFixed, FixedLength: 32}}}},
-			"signAdmission": {Name: "signAdmission", INS: 0x70, StreamMode: StreamModePublicInvalidate,
+			"signAdmission": {Name: "signAdmission", INS: 0x70, StreamMode: StreamModeChunked,
 				Request: stream(320), Response: stream(1408)},
 		},
 	}
@@ -86,8 +87,9 @@ func TestStreamModesRealSimulator(t *testing.T) {
 }
 
 // authWithModes is the real Auth fixture with the owner-selected REV4 modes:
-// public-invalidate provisioning and admission, chunked signatures, and the
-// issuer methods left on the authenticated contract.
+// public-invalidate provisioning (INS 0x10 only), chunked signatures and
+// admission (INS 0x20/0x30/0x40/0x70), and the issuer methods left on the
+// authenticated contract.
 func authWithModes(t *testing.T) *Schema {
 	t.Helper()
 	s, err := ParseFile("testdata/bsim-auth.json")
@@ -98,7 +100,7 @@ func authWithModes(t *testing.T) *Schema {
 	s.Applet.StreamWorkspaceCleanup = StreamWorkspaceCleanupAuthenticatedInvalidate
 	for name, mode := range map[string]string{
 		"buildProvisioningEnvelopeV3":   StreamModePublicInvalidate,
-		"signAdmissionV1":               StreamModePublicInvalidate,
+		"signAdmissionV1":               StreamModeChunked,
 		"signAuthenticationChallengeV1": StreamModeChunked,
 		"signAuthenticationSessionV1":   StreamModeChunked,
 		"signMigrationIntentV1":         StreamModeChunked,
@@ -126,7 +128,10 @@ func TestStreamModeValidation(t *testing.T) {
 		{"ordinary-method", func(s *Schema) { s.Methods["getVersion"].StreamMode = StreamModeChunked }, `getVersion (INS 0x01): stream mode "chunked" applies only to a streamed method`},
 		{"whole-reply-area", func(s *Schema) { s.Applet.StreamWorkspaceCleanup = pluginapi.StreamWorkspaceCleanupWholeReplyArea }, `requires stream_workspace_cleanup "authenticated-invalidate"`},
 		{"released-default", func(s *Schema) { s.Applet.StreamWorkspaceCleanup = "" }, `requires stream_workspace_cleanup "authenticated-invalidate"`},
-		{"chunked-streamed-result", func(s *Schema) { s.Methods["signAdmission"].StreamMode = StreamModeChunked }, `signAdmission (INS 0x70): stream mode "chunked" supports short results only`},
+		{"chunked-response-only", func(s *Schema) {
+			s.Methods["signTranscript"].Request = nil
+			s.Methods["signTranscript"].Response = s.Methods["signAdmission"].Response
+		}, `signTranscript (INS 0x20): stream mode "chunked" requires a request stream`},
 		{"response-only-public", func(s *Schema) {
 			s.Methods["signTranscript"].Request = nil
 			s.Methods["signTranscript"].Response = s.Methods["signAdmission"].Response
@@ -154,7 +159,7 @@ func TestStreamModeValidation(t *testing.T) {
 	if err != nil || len(files) != 7 {
 		t.Fatalf("Auth fixture with modes refused: %v", err)
 	}
-	// Without the two public modes the same Auth fixture is refused again.
+	// Without a mode on its streamed-result method the Auth fixture is refused again.
 	s := authWithModes(t)
 	s.Methods["signAdmissionV1"].StreamMode = ""
 	if _, err := (Plugin{}).Generate(s, auth); err == nil || !strings.Contains(err.Error(), "signAdmissionV1 (INS 0x70)") {
@@ -226,7 +231,7 @@ func streamModesSourceContract(r *JavaGenerationResult) error {
 	runtime, skeleton, endpoint := string(r.StreamRuntimeSource), string(r.SkeletonSource), string(r.StreamEndpointSource)
 	for _, check := range []struct{ label, source, want string }{
 		{"mode parameter", endpoint, "            byte operation,\n            byte methodMode,\n"},
-		{"mode table", skeleton, "    private static final byte[] STREAM_MODES = {\n        (byte) 1, (byte) 2, (byte) 0, (byte) 1 };\n"},
+		{"mode table", skeleton, "    private static final byte[] STREAM_MODES = {\n        (byte) 1, (byte) 2, (byte) 0, (byte) 2 };\n"},
 		{"mode forwarding", skeleton, "operation, STREAM_MODES[row],"},
 		{"gate", runtime, "        if (!authenticated && (methodMode == MODE_AUTHENTICATED ||\n                (scalars[IDX_STATE] == STATE_WRITING &&\n                        scalars[IDX_METHOD_MODE] == MODE_AUTHENTICATED))) {\n            rejectWithoutClearing(SW_SECURITY_STATUS_NOT_SATISFIED);"},
 		{"chunk admission", runtime, "            requireRamSpan(callerWorkspace);\n            sha256.updateDigest(request, requestOffset, requestLength);"},
@@ -335,20 +340,25 @@ func TestStreamModesNarrowingMutants(t *testing.T) {
 		{"chunked-begin-inherits-digest", [][2]string{{"            if (scalars[IDX_METHOD_MODE] == MODE_CHUNKED) {\n                sha256.resetDigest();", "            if (scalars[IDX_METHOD_MODE] == MODE_CHUNKED && p2 != 2) {\n                sha256.resetDigest();"}}, "chunked fresh session after reset close wrote persistent"},
 		// Public producer.
 		{"read-admits-persistent-first-chunk", [][2]string{{"        // Produce the chunk again into the admitted RAM span; it is never stored.\n        requireNonPersistentOutput(response, callerWorkspace);", "        // Produce the chunk again into the admitted RAM span; it is never stored.\n        if (index != 0) {\n            requireNonPersistentOutput(response, callerWorkspace);\n        }"}}, "persistent read span admitted"},
-		{"close-caches-first-result-chunk", [][2]string{{"            sha256.updateDigest(response, responseOffset, length);\n", "            sha256.updateDigest(response, responseOffset, length);\n            if (offset == 0 && method == 4) {\n                copy(response, responseOffset, workspace, (short) 0, length);\n            }\n"}}, "public close wrote persistent"},
+		{"close-caches-first-envelope-chunk", [][2]string{{"            sha256.updateDigest(response, responseOffset, length);\n", "            sha256.updateDigest(response, responseOffset, length);\n            if (offset == 0 && method == 1) {\n                copy(response, responseOffset, workspace, (short) 0, length);\n            }\n"}}, "public close wrote persistent"},
+		{"close-caches-admission-signature", [][2]string{{"            sha256.updateDigest(response, responseOffset, length);\n", "            sha256.updateDigest(response, responseOffset, length);\n            if (offset == 0 && method == 4) {\n                copy(response, responseOffset, workspace, (short) 0, (short) 73);\n            }\n"}}, "admission close wrote persistent"},
+		{"admission-close-skips-digest-for-320-bytes", [][2]string{{"        sha256.digest(request, digestOffset, (short) 0, digestScratch, (short) 0);\n        if (!equalsRange(digestScratch, (short) 0, request, digestOffset, DIGEST_LENGTH)) {", "        sha256.digest(request, digestOffset, (short) 0, digestScratch, (short) 0);\n        if (scalars[IDX_INPUT_LENGTH] != 320 && !equalsRange(digestScratch, (short) 0, request, digestOffset, DIGEST_LENGTH)) {"}}, "admission bad close digest wrote persistent"},
+		{"read-admits-persistent-for-admission", [][2]string{{"        // Produce the chunk again into the admitted RAM span; it is never stored.\n        requireNonPersistentOutput(response, callerWorkspace);", "        // Produce the chunk again into the admitted RAM span; it is never stored.\n        if (scalars[IDX_ACTIVE_METHOD] != 4) {\n            requireNonPersistentOutput(response, callerWorkspace);\n        }"}}, "persistent read span admitted on admission"},
 		{"result-admits-empty", [][2]string{{"        if (total <= 0 || total > scalars[IDX_RESPONSE_MAX_LENGTH]) {", "        if (total < 0 || total > scalars[IDX_RESPONSE_MAX_LENGTH]) {"}}, "public prepare refusal 7 wrote persistent"},
 		{"result-admits-max-plus-one", [][2]string{{"        if (total <= 0 || total > scalars[IDX_RESPONSE_MAX_LENGTH]) {", "        if (total <= 0 || total > (short) (scalars[IDX_RESPONSE_MAX_LENGTH] + 1)) {"}}, "public prepare refusal 6 wrote persistent"},
-		{"descriptor-admits-persistent-for-eight-packets", [][2]string{{"                    requireRamSpan(responseBuffer);", "                    if (scalars[IDX_RESULT_PACKET_COUNT] != 8) {\n                        requireRamSpan(responseBuffer);\n                    }"}}, "persistent descriptor span admitted"},
-		{"close-admits-persistent-for-admission", [][2]string{{"        requireCloseData(requestLength);\n        requireNonPersistentOutput(response, callerWorkspace);", "        requireCloseData(requestLength);\n        if (scalars[IDX_ACTIVE_METHOD] != 4) {\n            requireNonPersistentOutput(response, callerWorkspace);\n        }"}}, "persistent response admitted on public close"},
+		{"descriptor-admits-persistent-for-two-packets", [][2]string{{"                    requireRamSpan(responseBuffer);", "                    if (scalars[IDX_RESULT_PACKET_COUNT] != 2) {\n                        requireRamSpan(responseBuffer);\n                    }"}}, "persistent descriptor span admitted"},
+		{"close-admits-persistent-for-envelope", [][2]string{{"        requireCloseData(requestLength);\n        requireNonPersistentOutput(response, callerWorkspace);", "        requireCloseData(requestLength);\n        if (scalars[IDX_ACTIVE_METHOD] != 1) {\n            requireNonPersistentOutput(response, callerWorkspace);\n        }"}}, "persistent response admitted on public close"},
+		{"close-admits-persistent-for-admission", [][2]string{{"        requireCloseData(requestLength);\n        requireNonPersistentOutput(response, callerWorkspace);", "        requireCloseData(requestLength);\n        if (scalars[IDX_ACTIVE_METHOD] != 4) {\n            requireNonPersistentOutput(response, callerWorkspace);\n        }"}}, "persistent response admitted on admission close"},
 		{"close-admits-persistent-for-issuer", [][2]string{{"        requireCloseData(requestLength);\n        requireNonPersistentOutput(response, callerWorkspace);", "        requireCloseData(requestLength);\n        if (scalars[IDX_ACTIVE_METHOD] != 3) {\n            requireNonPersistentOutput(response, callerWorkspace);\n        }"}}, "persistent response admitted on issuer close"},
 		{"issuer-foreign-write-keeps-handle", [][2]string{{"                    // A refused authenticated APDU invalidates the live handle.\n                    fail(SW_WRONG_STATE);", "                    // A refused authenticated APDU invalidates the live handle.\n                    if (scalars[IDX_METHOD_MODE] == MODE_AUTHENTICATED) {\n                        rejectWithoutClearing(SW_WRONG_STATE);\n                    }\n                    fail(SW_WRONG_STATE);"}}, "issuer foreign refusal retained live handle"},
 		{"bad-read-index-keeps-handle", [][2]string{{"        if (count != (scalars[IDX_RESULT_PACKET_COUNT] & 0xFF) || index >= count) {\n            fail(SW_INVALID_DATA);", "        if (count != (scalars[IDX_RESULT_PACKET_COUNT] & 0xFF) || index >= count) {\n            if (index == count) {\n                rejectWithoutClearing(SW_INVALID_DATA);\n            }\n            fail(SW_INVALID_DATA);"}}, "public bad read index retained live handle"},
 		{"public-foreign-write-keeps-handle", [][2]string{{"                    // A refused authenticated APDU invalidates the live handle.\n                    fail(SW_WRONG_STATE);", "                    // A refused authenticated APDU invalidates the live handle.\n                    if (scalars[IDX_METHOD_MODE] == MODE_PUBLIC_INVALIDATE) {\n                        rejectWithoutClearing(SW_WRONG_STATE);\n                    }\n                    fail(SW_WRONG_STATE);"}}, "public foreign write retained live handle"},
 		{"public-foreign-close-keeps-handle", [][2]string{{"                    scalars[IDX_ACTIVE_METHOD] != methodId) {\n                fail(SW_WRONG_STATE);", "                    scalars[IDX_ACTIVE_METHOD] != methodId) {\n                if (scalars[IDX_STATE] != STATE_EMPTY && scalars[IDX_METHOD_MODE] == MODE_PUBLIC_INVALIDATE) {\n                    rejectWithoutClearing(SW_WRONG_STATE);\n                }\n                fail(SW_WRONG_STATE);"}}, "public foreign refusal retained live handle"},
 		{"public-changed-duplicate-admits-one-byte", [][2]string{{"                    !equalsRange(workspace, scalars[IDX_LAST_CHUNK_OFFSET],\n                            request, requestOffset, requestLength)) {", "                    (!equalsRange(workspace, scalars[IDX_LAST_CHUNK_OFFSET],\n                            request, requestOffset, requestLength) && request[(short) (requestOffset + 7)] == workspace[(short) (scalars[IDX_LAST_CHUNK_OFFSET] + 7)])) {"}}, "public changed duplicate wrote persistent"},
-		{"staged-close-inherits-digest-for-admission", [][2]string{{"        // The engine is shared with running digests; never inherit their state.\n        sha256.resetDigest();", "        // The engine is shared with running digests; never inherit their state.\n        if (scalars[IDX_ACTIVE_METHOD] != 4) {\n            sha256.resetDigest();\n        }"}}, "public read failure close"},
+		{"staged-close-inherits-digest-for-envelope", [][2]string{{"        // The engine is shared with running digests; never inherit their state.\n        sha256.resetDigest();", "        // The engine is shared with running digests; never inherit their state.\n        if (scalars[IDX_ACTIVE_METHOD] != 1) {\n            sha256.resetDigest();\n        }"}}, "public close after digest pass failure"},
 		// Runtime begin.
-		{"begin-admits-chunked-streamed-result", [][2]string{{"                (responseEnabled && methodMode != MODE_PUBLIC_INVALIDATE) ||", "                (responseEnabled && methodMode != MODE_PUBLIC_INVALIDATE && methodMode != MODE_CHUNKED) ||"}}, "chunked streamed result admitted"},
+		{"begin-admits-authenticated-streamed-result-of-64", [][2]string{{"                (responseEnabled && methodMode == MODE_AUTHENTICATED) ||", "                (responseEnabled && methodMode == MODE_AUTHENTICATED && responseLimit != 64) ||"}}, "authenticated streamed result admitted"},
+		{"begin-admits-chunked-without-request", [][2]string{{"                !requestEnabled ||\n                (responseEnabled && methodMode == MODE_AUTHENTICATED) ||", "                (!requestEnabled && methodMode != MODE_CHUNKED) ||\n                (responseEnabled && methodMode == MODE_AUTHENTICATED) ||"}}, "chunked method without request stream admitted"},
 		{"begin-admits-mode-three", [][2]string{{"                (methodMode != MODE_AUTHENTICATED && methodMode != MODE_PUBLIC_INVALIDATE &&\n                        methodMode != MODE_CHUNKED)) {", "                (methodMode != MODE_AUTHENTICATED && methodMode != MODE_PUBLIC_INVALIDATE &&\n                        methodMode != MODE_CHUNKED && methodMode != 3)) {"}}, "unknown stream mode admitted"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -385,20 +395,20 @@ func TestStreamModesTokenPreservingMutant(t *testing.T) {
 }
 
 // Generation-time narrowing mutants: each validation stays present and admits
-// exactly INS 0x70 in the class it must refuse. The named Go test must fail on
+// exactly one INS in the class it must refuse. The named Go test must fail on
 // the mutated module copy; a build failure is not a kill.
 func TestStreamModeGenerationNarrowingMutants(t *testing.T) {
 	if testing.Short() {
 		t.Skip("copies the module and runs go test")
 	}
 	for _, tc := range []struct{ name, file, from, to, killed string }{
-		{"chunked-admits-streamed-result-for-0x70", "codegen/internal/render/stream_modes.go",
-			"if method.StreamMode == StreamModeChunked && method.ResponseStream != nil {",
-			"if method.StreamMode == StreamModeChunked && method.ResponseStream != nil && method.INS != 0x70 {",
-			"TestStreamModeValidation/chunked-streamed-result"},
+		{"mode-admits-response-only-for-0x20", "codegen/internal/render/stream_modes.go",
+			"if method.RequestStream == nil {",
+			"if method.RequestStream == nil && method.INS != 0x20 {",
+			"TestStreamModeValidation/chunked-response-only"},
 		{"authenticated-admits-streamed-result-for-0x70", "codegen/internal/render/stream_authenticated.go",
-			"if method.IsStream && method.ResponseStream != nil && method.StreamMode != StreamModePublicInvalidate {",
-			"if method.IsStream && method.ResponseStream != nil && method.StreamMode != StreamModePublicInvalidate && method.INS != 0x70 {",
+			"if method.IsStream && method.ResponseStream != nil && method.StreamMode == \"\" {",
+			"if method.IsStream && method.ResponseStream != nil && method.StreamMode == \"\" && method.INS != 0x70 {",
 			"TestStreamModeValidation/authenticated-streamed-result"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
