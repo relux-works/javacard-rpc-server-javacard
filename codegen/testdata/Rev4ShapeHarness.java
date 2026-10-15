@@ -103,6 +103,8 @@ public class Rev4ShapeHarness {
         byte[] changed = a.clone();
         changed[100] ^= 1;
         expect(0x6A80, SIGN, 0, 2, changed, 0, "chunked changed duplicate wrote persistent");
+        // The next chunk at the stream's expected index: a live stream accepts it.
+        expect(0x6A80, SIGN, 1, 2, b, 0, "chunked changed duplicate left a live stream");
         expect(0x6985, SIGN + CLOSE, 0, 0, close(t), 0, "chunked changed duplicate retained live handle");
         expect(0x9000, SIGN, 0, 2, a, 0, "chunked identical duplicate control");
         expect(0x6A80, SIGN, 0, 2, a, 0, "chunked identical duplicate wrote persistent");
@@ -110,6 +112,12 @@ public class Rev4ShapeHarness {
 
         // Invalid lengths and close declarations.
         expect(0x6700, SIGN, 0, 2, Arrays.copyOf(a, 100), 0, "chunked short middle chunk wrote persistent");
+        // Mid-stream shape refusal: the valid chunk at the same index must find
+        // a dead stream (6A80); a live stream would accept it with 9000.
+        expect(0x9000, SIGN, 0, 3, part(t3, 0), 0, "chunked mid-stream shape control");
+        expect(0x6700, SIGN, 1, 3, Arrays.copyOf(part(t3, 1), 100), 0, "chunked mid-stream short chunk wrote persistent");
+        expect(0x6A80, SIGN, 1, 3, part(t3, 1), 0, "chunked short middle refusal left a live stream");
+        signSession(t3, "chunked fresh session after shape refusal");
         sendChunks(t, "chunked close length control");
         byte[] wrongLength = close(t);
         wrongLength[1] ^= 1;
@@ -162,6 +170,9 @@ public class Rev4ShapeHarness {
         Rev4ShapeApplet.control = 3;
         expect(0x9000, SIGN, 0, 2, a, 0, "chunked handler failure control");
         expect(0x6F00, SIGN, 1, 2, b, 0, "chunked handler chunk failure wrote persistent");
+        // The failed chunk again, with the handler healthy: a live stream accepts it.
+        Rev4ShapeApplet.control = 0;
+        expect(0x6A80, SIGN, 1, 2, b, 0, "chunked handler chunk failure left a live stream");
         expect(0x6985, SIGN + CLOSE, 0, 0, close(t), 0, "chunked handler failure retained live handle");
         Rev4ShapeApplet.control = 1;
         sendChunks(t, "chunked finish failure control");
@@ -245,6 +256,9 @@ public class Rev4ShapeHarness {
         expect(0x6A80, ENV, 2, 3, part(env, 2), 0, "public out-of-order chunk wrote persistent");
         expect(0x6A80, ENV, 1, 3, part(env, 1), 0, "public order refusal retained live handle");
         expect(0x6700, ENV, 0, 2, Arrays.copyOf(a, 100), 0, "public short middle chunk wrote persistent");
+        expect(0x9000, ENV, 0, 3, part(env, 0), 192, "public mid-stream shape control");
+        expect(0x6700, ENV, 1, 3, Arrays.copyOf(part(env, 1), 100), 0, "public mid-stream short chunk wrote persistent");
+        expect(0x6A80, ENV, 1, 3, part(env, 1), 0, "public short middle refusal left a live stream");
         publicUpload(in, "public close length control");
         byte[] wrongLength = close(in);
         wrongLength[1] ^= 1;
@@ -375,10 +389,16 @@ public class Rev4ShapeHarness {
         byte[] changed = a.clone();
         changed[50] ^= 1;
         expect(0x6A80, ADM, 0, 2, changed, 0, "admission changed duplicate wrote persistent");
+        expect(0x6A80, ADM, 1, 2, b, 0, "admission changed duplicate left a live stream");
         expect(0x6985, ADM + CLOSE, 0, 0, close(t), 0, "admission changed duplicate retained live handle");
         expect(0x6A80, ADM, 1, 2, b, 0, "admission out-of-order first packet wrote persistent");
         expect(0x6700, ADM, 0, 3, a, 0, "admission oversized declaration wrote persistent");
         expect(0x6700, ADM, 0, 2, Arrays.copyOf(a, 100), 0, "admission short middle chunk wrote persistent");
+        // Mid-stream shape refusal (index past the declared count), then the
+        // valid last chunk: a live stream would accept it.
+        expect(0x9000, ADM, 0, 2, a, 0, "admission mid-stream shape control");
+        expect(0x6700, ADM, 2, 2, b, 0, "admission index past count wrote persistent");
+        expect(0x6A80, ADM, 1, 2, b, 0, "admission shape refusal left a live stream");
         admissionUpload(t, "admission close digest control");
         byte[] wrongDigest = close(t);
         wrongDigest[30] ^= 1;
@@ -388,8 +408,10 @@ public class Rev4ShapeHarness {
         byte[] wrongLength = close(t);
         wrongLength[1] ^= 1;
         expect(0x6700, ADM + CLOSE, 0, 0, wrongLength, 0, "admission close length wrote persistent");
+        expect(0x6985, ADM + CLOSE, 0, 0, close(t), 0, "admission close length retained live handle");
         expect(0x9000, ADM, 0, 2, a, 0, "admission early close control");
         expect(0x6985, ADM + CLOSE, 0, 0, close(t), 0, "admission early close wrote persistent");
+        expect(0x6A80, ADM, 1, 2, b, 0, "admission early close retained live handle");
         expect(0x9000, ADM, 0, 2, a, 0, "admission abort control");
         expect(0x9000, ADM + ABORT, 0, 0, EMPTY, 0, "admission abort wrote persistent");
         expect(0x6A80, ADM, 1, 2, b, 0, "admission abort retained live handle");
@@ -535,6 +557,13 @@ public class Rev4ShapeHarness {
                 expect(0x6700, family, count - 1, count, last, 0, name + " request over maximum wrote persistent");
                 if (family != ENV && Rev4ShapeApplet.chunkCalls - calls != count - 1)
                     throw new AssertionError(name + " request over maximum reached the handler [" + route + "]");
+                // Dead-stream witness, before any CLOSE: the last chunk cut to
+                // fit exactly the maximum, at the same expected index. A live
+                // stream accepts it with 9000; a dead one refuses it 6A80, 0 B.
+                byte[] fit = Arrays.copyOf(last, max - (count - 1) * 192);
+                expect(0x6A80, family, count - 1, count, fit, 0, name + " request over maximum left a live stream");
+                // CLOSE refuses any incomplete stream, live or dead; it is a
+                // 0 B check here, not the liveness witness.
                 expect(0x6985, family + CLOSE, 0, 0, close(Arrays.copyOf(over, (count - 1) * 192)), 0,
                         name + " request over maximum retained live handle");
                 expect(0x6A80, family, count - 1, count, last, 0, name + " request over maximum retry wrote persistent");

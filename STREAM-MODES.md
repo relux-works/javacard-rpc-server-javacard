@@ -158,6 +158,14 @@ streamed result digest, and the staged CLOSE digest. An interrupted running
 digest therefore never leaks into a later one; the regression witness is the
 public CLOSE that follows a refused digest pass in the simulator scenario.
 
+A refused WRITE is proven dead by the next WRITE at the stream's expected
+index, sent before any CLOSE: a live stream accepts it with `9000`, a dead one
+refuses it `6A80` with 0 B. After a request-total refusal that chunk is the
+last one cut to exactly the maximum; after a short middle chunk it is the valid
+192 B chunk at the same index. A CLOSE after a partial upload is not a liveness
+witness: it refuses `6985` on any incomplete stream, live or dead, and clears a
+live one.
+
 ## Measurements
 
 jCardSim 3.0.5.9-relux.1, both lifecycle choices, adapter route and the
@@ -221,10 +229,13 @@ payload, not a card total.
   a refusal path, directly and through an alias, on the accepted chunked path
   and on an accepted producer read is caught by name; a transient plant stays
   green);
-- `TestStreamModesNarrowingMutants` (46 behavioral mutants, each keeping its
+- `TestStreamModesNarrowingMutants` (54 behavioral mutants, each keeping its
   guard and admitting one member of the refused class, among them the request
   total bound per mode, every non-WRITE operation of a foreign method during a
-  live issuer upload, and the caller-workspace half of CLOSE and READ output
-  admission);
+  live issuer upload, the caller-workspace half of CLOSE and READ output
+  admission, and keeps-handle mutants that keep the refusal status and its 0 B
+  but leave the stream live after a request-total refusal (per mode), a
+  mid-stream shape refusal (all modes, public, admission) and a mid-stream
+  handler failure);
 - `TestStreamModesAllocationPayload` and `TestStreamModesClassicCAP` (Classic
   3.0.5u4 conversion with a fixture using every callback and `Signature.update`).

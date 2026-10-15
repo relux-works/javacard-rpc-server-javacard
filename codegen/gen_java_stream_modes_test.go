@@ -336,6 +336,16 @@ func TestStreamModesNarrowingMutants(t *testing.T) {
 	boundUnless := func(cond string) string {
 		return "        if (" + cond + " && (scalars[IDX_INPUT_LENGTH] & 0xFFFF) + length >\n                (scalars[IDX_REQUEST_MAX_LENGTH] & 0xFFFF)) {"
 	}
+	// Keeps-handle mutants keep the refusal status and its 0 B but leave the
+	// stream live when cond holds; only a fitting chunk at the same index
+	// tells them apart from the candidate (a CLOSE refuses either way).
+	const boundRefusal = bound + "\n            fail(SW_WRONG_LENGTH);"
+	const shapeRefusal = "                length > chunkSize || (index < count - 1 && length != chunkSize)) {\n            fail(SW_WRONG_LENGTH);"
+	const handlerFailure = "        } catch (StreamStatusWordException e) {\n            if (e != failure) {\n                clearAll();"
+	keepsHandle := func(anchor, cond string) string {
+		head := strings.TrimSuffix(anchor, "fail(SW_WRONG_LENGTH);")
+		return head + "if (" + cond + ") {\n                rejectWithoutClearing(SW_WRONG_LENGTH);\n            }\n            fail(SW_WRONG_LENGTH);"
+	}
 	for _, tc := range []struct {
 		name      string
 		edits     [][2]string
@@ -356,6 +366,15 @@ func TestStreamModesNarrowingMutants(t *testing.T) {
 		{"bound-skipped-for-admission", [][2]string{{bound, boundUnless("scalars[IDX_ACTIVE_METHOD] != 4")}}, "admission request over maximum wrote persistent"},
 		{"bound-admits-max-plus-one", [][2]string{{bound, "        if ((scalars[IDX_INPUT_LENGTH] & 0xFFFF) + length >\n                (scalars[IDX_REQUEST_MAX_LENGTH] & 0xFFFF) + 1) {"}}, "public request over maximum wrote persistent"},
 		{"bound-plus-128", [][2]string{{bound, "        if ((scalars[IDX_INPUT_LENGTH] & 0xFFFF) + length >\n                (scalars[IDX_REQUEST_MAX_LENGTH] & 0xFFFF) + 128) {"}}, "public request over maximum wrote persistent"},
+		// Request total bound and chunk shape: refused, 0 B, but the stream stays live.
+		{"bound-refusal-keeps-handle", [][2]string{{boundRefusal, strings.Replace(boundRefusal, "fail(", "rejectWithoutClearing(", 1)}}, "public request over maximum left a live stream"},
+		{"bound-refusal-keeps-public-handle", [][2]string{{boundRefusal, keepsHandle(boundRefusal, "scalars[IDX_METHOD_MODE] == MODE_PUBLIC_INVALIDATE")}}, "public request over maximum left a live stream"},
+		{"bound-refusal-keeps-chunked-handle", [][2]string{{boundRefusal, keepsHandle(boundRefusal, "scalars[IDX_METHOD_MODE] == MODE_CHUNKED && scalars[IDX_ACTIVE_METHOD] != 4")}}, "chunked request over maximum left a live stream"},
+		{"bound-refusal-keeps-admission-handle", [][2]string{{boundRefusal, keepsHandle(boundRefusal, "scalars[IDX_ACTIVE_METHOD] == 4")}}, "admission request over maximum left a live stream"},
+		{"shape-refusal-keeps-handle", [][2]string{{shapeRefusal, keepsHandle(shapeRefusal, "scalars[IDX_STATE] == STATE_WRITING")}}, "chunked short middle refusal left a live stream"},
+		{"shape-refusal-keeps-public-handle", [][2]string{{shapeRefusal, keepsHandle(shapeRefusal, "scalars[IDX_STATE] == STATE_WRITING && scalars[IDX_METHOD_MODE] == MODE_PUBLIC_INVALIDATE")}}, "public short middle refusal left a live stream"},
+		{"shape-refusal-keeps-admission-handle", [][2]string{{shapeRefusal, keepsHandle(shapeRefusal, "scalars[IDX_STATE] == STATE_WRITING && scalars[IDX_ACTIVE_METHOD] == 4")}}, "admission shape refusal left a live stream"},
+		{"handler-chunk-failure-keeps-handle", [][2]string{{handlerFailure, "        } catch (StreamStatusWordException e) {\n            if (e != failure && !(operation == OP_WRITE_OR_INVOKE &&\n                    scalars[IDX_METHOD_MODE] == MODE_CHUNKED && scalars[IDX_NEXT_PACKET_INDEX] != 0)) {\n                clearAll();"}}, "chunked handler chunk failure left a live stream"},
 		// Caller-workspace half of output admission.
 		{"chunked-close-skips-workspace-admission", [][2]string{{closeAdmission, workspaceSkipped(closeAdmission, "scalars[IDX_METHOD_MODE] == MODE_CHUNKED")}}, "persistent caller workspace admitted on chunked close"},
 		{"admission-close-skips-workspace-admission", [][2]string{{closeAdmission, workspaceSkipped(closeAdmission, "scalars[IDX_ACTIVE_METHOD] == 4")}}, "persistent caller workspace admitted on admission close"},
