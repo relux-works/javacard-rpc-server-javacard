@@ -36,8 +36,8 @@ reviewed `authenticated-invalidate` candidate.
 The new mode's dispatch entries take a trailing `boolean authenticated`:
 `dispatchStreamTo(..., authenticated)`, `processIfStream(apdu, authenticated)`
 and the endpoint's `dispatch(..., authenticated)`. The empty selector and
-`whole-reply-area` generate the same files as v0.5.0; the 216-row projection and
-the measured Auth projection hashes are unchanged. The wire format, status
+`whole-reply-area` retain their generic API. The independent fixture projections
+freeze current source and do not prove historical release equivalence. The wire format, status
 words other than the new `6982` for an unauthenticated stream APDU, and the
 handler signatures are unchanged.
 
@@ -57,11 +57,12 @@ negative instrument controls, twenty runtime narrowing mutants, two review
 regression witnesses, one
 token-preserving mutant, one generation-time Go mutant, allocation payload and
 Classic 3.0.5u4 CAP conversion with off-card verification. The modes add their
-own jCardSim scenario with real ECDSA over chunked transcripts, ledger controls
+own jCardSim storage scenario with chunked offset inspection, circular window
+reads, page previews and authenticated page descriptions, ledger controls
 on refusal, chunked-success and producer-read paths, fifty-four behavioral
 narrowing mutants (including keeps-handle mutants for refused writes, each
 killed by a fitting chunk at the same index), one token-preserving mutant, two generation-time Go mutants,
-the allocation payload of the full Auth fixture and CAP conversion. Physical-card
+the allocation payload of independent storage fixtures and CAP conversion. Physical-card
 behavior, JCRE/native writes (including Signature and MessageDigest state) and
 card-wide RAM totals are not claimed.
 

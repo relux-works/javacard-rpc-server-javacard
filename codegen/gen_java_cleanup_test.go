@@ -3,6 +3,8 @@ package codegen
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
+	"os"
 	"path"
 	"strings"
 	"testing"
@@ -179,29 +181,29 @@ public class CleanupHarness {
 }
 `
 
-// Five hashes freeze the current v0.5.0 Auth-shaped target projection; the
-// historical keeper measurements remain in documentation. Current target
-// allocation/cost suites are rerun separately. Matching hashes does not replay
-// the changed consumer, provider internals or physical reset/RAM/NVM metrics.
-func TestPersistentCleanupWholeMeasuredAuthIdentity(t *testing.T) {
-	s, err := ParseFile("testdata/bsim-auth.json")
+// Five hashes freeze the synthetic storage target's reviewed source projection.
+// They are not independent behavior or physical allocation measurements.
+func TestPersistentCleanupWholeSampleProjection(t *testing.T) {
+	s, err := ParseFile("testdata/sample-store.json")
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The frozen allocation fixture has B6; the immutable real Auth IDL uses B4.
-	s.Applet.CLA = 0xB4
 	s.Applet.StreamWorkspace = "persistent"
 	s.Applet.StreamWorkspaceCleanup = pluginapi.StreamWorkspaceCleanupWholeReplyArea
-	files, err := (Plugin{}).Generate(s, pluginapi.Options{Namespace: "ru.mts.bsimid.applet.auth", StreamMemory: "clear_on_reset", SimulatorDependency: "works.relux:jcardsim:3.0.5.9-relux.2"})
+	files, err := (Plugin{}).Generate(s, pluginapi.Options{Namespace: "io.jcrpc.store", StreamMemory: "clear_on_reset", SimulatorDependency: "works.relux:jcardsim:3.0.5.9-relux.2"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	expected := map[string]string{
-		"BSimAuthBoundedStreamRuntime.java": "fb48a9958d7e12e4b9badde53dba1d0feea963feb2d85d1acf23240147d2ddb8",
-		"BSimAuthSkeleton.java":             "aa1a44cffb0e461613b000d5cbae3d51e72b71fcbdb91a6a38d017f848cfaddf",
-		"BSimAuthStreamAPDUAdapter.java":    "2cc5793bc033325919522eddfe54d2ecb7db6b4b0bf9fbc6fa88f9216c336c1b",
-		"BSimAuthStreamEndpoint.java":       "ad1c1af8a05c3b9138b00f5a368b9290c7f0935787a19656ddbd8f6a25eb8539",
-		"BSimAuthTransport.java":            "75ff6fd4b035769347be3c6debe4e458e0141a0544f2f779a727939c626fb279",
+	data, err := os.ReadFile("testdata/sample-store-whole-projection.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var expected map[string]string
+	if err = json.Unmarshal(data, &expected); err != nil {
+		t.Fatal(err)
+	}
+	if len(expected) != 5 {
+		t.Fatal("incomplete storage source projection")
 	}
 	checked := 0
 	for _, file := range files {
@@ -211,7 +213,7 @@ func TestPersistentCleanupWholeMeasuredAuthIdentity(t *testing.T) {
 		}
 		sum := sha256.Sum256(file.Data)
 		if hex.EncodeToString(sum[:]) != want {
-			t.Fatalf("current Auth target projection drift: %s", file.Name)
+			t.Fatalf("storage target projection drift: %s", file.Name)
 		}
 		checked++
 	}

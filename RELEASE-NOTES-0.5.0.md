@@ -1,7 +1,7 @@
 # v0.5.0 source candidate
 
 This breaking minor appends a caller-owned workspace array/offset/capacity to all
-ordinary and streamed generated dispatch/callback APIs. Auth Route B can now
+ordinary and streamed generated dispatch/callback APIs. A caller can now
 receive the legal entry workspace independently of exact reply spans and owned
 stream bulk storage. Regenerate subclasses and adapters using
 [the copyable migration contract](CALLER-WORKSPACE.md); no old-signature shim is
@@ -11,7 +11,7 @@ Borrowed scratch is checked before callback/session effects; invalid stream
 scratch preserves pending state for a valid retry. Scratch/input/output references
 remain command-local. Trusted handlers own alias ordering, phase minima and
 output liveness. The generic runtime accepts empty valid windows and has no
-Auth-specific size policy. A 133-byte physical buffer cannot satisfy 196/260
+consumer-specific size policy. A 133-byte physical buffer cannot satisfy 196/260
 phase minima or whole 177/190-byte replies.
 
 The root Go module's next release tag is v0.5.0. Root runtime metadata is 0.5.0;
@@ -28,6 +28,6 @@ support. Historical v0.4.5 and v0.4.0 evidence stays historical; the maintained
 
 Independent source acceptance, canonical signed branch/PR/review/green-check
 landing, root signed v0.5.0 tag and actual release are still release-owner work.
-This source candidate makes no publication, physical installation or real Auth
+This source candidate makes no publication, physical installation or real
 consumer acceptance claim. Consumers qualify their real command chains against
 the actual published target/facade pins under their own JVM authority.

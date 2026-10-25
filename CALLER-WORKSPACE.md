@@ -15,7 +15,7 @@ public final short dispatchTo(byte ins, byte p1, byte p2,
         byte[] callerWorkspace, short callerWorkspaceOffset, short callerWorkspaceCapacity);
 
 // Request arguments first, then writer output when applicable, then scratch.
-protected abstract short onGetAuthenticationIdentity(
+protected abstract short onReadRecord(
         byte[] output, short outputOffset, short outputCapacity,
         byte[] callerWorkspace, short callerWorkspaceOffset, short callerWorkspaceCapacity);
 protected abstract short onEcho(short prefix,
@@ -100,7 +100,7 @@ Scratch must be nonnull, with nonnegative offset/capacity contained in the
 array. Offset equal to array length is valid only at zero capacity. Validation
 uses subtraction after offset validation, so short addition overflow cannot
 admit an out-of-array span. Framework code accepts a valid empty window;
-consumer phases decide their own minimum. No Auth-specific 196/260 constant is
+consumer phases decide their own minimum. No consumer-specific size constant is
 part of generic code generation.
 
 Ordinary dispatch validates request, output and scratch before callbacks.
@@ -125,8 +125,8 @@ physical 133-byte APDU buffer cannot satisfy a 196-byte constructor probe or a
 260-byte phase geometry, nor a whole 177/190-byte reply. A larger host/simulator
 array is no evidence of physical card capacity or Security Domain borrowing
 permissions. The business fixtures prove only those declared numeric minima,
-not the real Auth crypto/provider/SD chain. Optional `int` support remains
-required by the current Classic renderer. Physical installation, Auth/RAM/NVM
+not a real consumer crypto/provider/SD chain. Optional `int` support remains
+required by the current Classic renderer. Physical installation and RAM/NVM
 acceptance and coordinated consumer regeneration belong to the consumer/release
 owners after actual signed source publication.
 

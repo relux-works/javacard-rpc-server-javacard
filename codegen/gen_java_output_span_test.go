@@ -19,7 +19,7 @@ func ordinaryWriterSchema() *Schema {
 		name  string
 		width int
 	}{
-		{"getAuthenticationIdentity", 127}, {"getAuthAppletInfo", 13}, {"getIssuer190", 190}, {"getIssuer177", 177},
+		{"readRecord", 127}, {"readStatistics", 13}, {"readLargeRecord190", 190}, {"readLargeRecord177", 177},
 	} {
 		s.Methods[row.name] = &Method{Name: row.name, INS: byte(i + 1), Response: &Message{Fields: []Field{{Name: "result", Type: FieldTypeBytesFixed, FixedLength: row.width}}}}
 	}
@@ -101,7 +101,7 @@ func TestOrdinaryOutputSpanSourceContract(t *testing.T) {
 	for _, row := range []struct {
 		name  string
 		width int
-	}{{"GetAuthenticationIdentity", 127}, {"GetAuthAppletInfo", 13}, {"GetIssuer190", 190}, {"GetIssuer177", 177}} {
+	}{{"ReadRecord", 127}, {"ReadStatistics", 13}, {"ReadLargeRecord190", 190}, {"ReadLargeRecord177", 177}} {
 		body := javaMethodBody(t, src, "handle"+row.name)
 		gate := fmt.Sprintf("if (outputCapacity < %d)", row.width)
 		call := fmt.Sprintf("on%s(output, outputOffset, (short) %d, callerWorkspace, callerWorkspaceOffset, callerWorkspaceCapacity)", row.name, row.width)
@@ -109,7 +109,7 @@ func TestOrdinaryOutputSpanSourceContract(t *testing.T) {
 			t.Errorf("capacity/callback/width wiring for %s", row.name)
 		}
 	}
-	for _, name := range []string{"dispatchTo", "handleGetAuthenticationIdentity", "handleGetAuthAppletInfo", "handleGetIssuer190", "handleGetIssuer177", "handleScalar0", "handleScalar1", "handleScalar2", "handleScalar3", "handleClear", "handleEcho", "handleTyped"} {
+	for _, name := range []string{"dispatchTo", "handleReadRecord", "handleReadStatistics", "handleReadLargeRecord190", "handleReadLargeRecord177", "handleScalar0", "handleScalar1", "handleScalar2", "handleScalar3", "handleClear", "handleEcho", "handleTyped"} {
 		if strings.Contains(javaMethodBody(t, src, name), "new ") {
 			t.Errorf("ordinary path allocates: %s", name)
 		}
@@ -132,7 +132,7 @@ func TestOrdinaryOutputSpanSourceContract(t *testing.T) {
 func TestOrdinaryOutputSpanSourceControl(t *testing.T) {
 	src := string(writerResult(t).SkeletonSource)
 	hasGuard := func(s string) bool {
-		return strings.Contains(javaMethodBody(t, s, "handleGetAuthenticationIdentity"), "if (produced != 127)")
+		return strings.Contains(javaMethodBody(t, s, "handleReadRecord"), "if (produced != 127)")
 	}
 	if !hasGuard(src) {
 		t.Fatal("valid control failed")
@@ -190,7 +190,7 @@ func TestGeneratedOrdinaryOutputNarrowingMutants(t *testing.T) {
 }
 
 // Ownership controls retain all window/width guards and introduce retention only
-// for one valid identity127 call. The original fixture must accept the candidate
+// for one valid 127-byte record call. The original fixture must accept the candidate
 // and reject each instance/static/component plant at its named runtime assertion;
 // arbitrary subclass object graphs remain outside the generated-class witness.
 func TestGeneratedOrdinaryOutputReferenceMutants(t *testing.T) {
@@ -208,7 +208,7 @@ func TestGeneratedOrdinaryOutputReferenceMutants(t *testing.T) {
 				t.Fatal("ownership plant anchor count")
 			}
 			src = strings.Replace(src, fieldAnchor, fieldAnchor+"\n    "+m.field, 1)
-			src = strings.Replace(src, storeAnchor, storeAnchor+"\n        if (ins == INS_GET_AUTHENTICATION_IDENTITY && outputCapacity == 127) { "+m.store+" }", 1)
+			src = strings.Replace(src, storeAnchor, storeAnchor+"\n        if (ins == INS_READ_RECORD && outputCapacity == 127) { "+m.store+" }", 1)
 			r.SkeletonSource = []byte(src)
 			output, err := runWriterJava(t, r)
 			exitError, isExit := err.(*exec.ExitError)
@@ -248,15 +248,16 @@ func runWriterJava(t *testing.T, r *JavaGenerationResult) (string, error) {
 	return string(output), e
 }
 
-// Actual Auth fixture is a mixed ordinary/stream schema. Its wire widths and
-// fixed INS constants are independent input expectations. All other stream
-// runtime/adapter bytes are checked against the historical release matrix.
-func TestOrdinaryOutputSpanAuthMixedSource(t *testing.T) {
-	s, e := ParseFile("testdata/bsim-auth.json")
+// The independent storage fixture is a mixed ordinary/stream schema. Its wire widths and
+// fixed INS constants are independent input expectations. Skeleton, endpoint,
+// bounded-runtime and APDU-adapter bytes use current-source projection receipts
+// in TestPluginReleasedV045Parity, not historical generation expectations.
+func TestOrdinaryOutputSpanSampleMixedSource(t *testing.T) {
+	s, e := ParseFile("testdata/sample-store.json")
 	if e != nil {
 		t.Fatal(e)
 	}
-	r, e := GenerateJavaSkeleton(s, "io.jcrpc.bsim")
+	r, e := GenerateJavaSkeleton(s, "io.jcrpc.store")
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -266,14 +267,14 @@ func TestOrdinaryOutputSpanAuthMixedSource(t *testing.T) {
 		width int
 		ins   byte
 	}{
-		{"getAuthenticationIdentity", 127, 1}, {"getAuthAppletInfo", 13, 2},
+		{"readRecord", 127, 3}, {"readStatistics", 13, 4},
 	} {
 		if s.Methods[row.name].INS != row.ins || fixedResponseWidth(t, s.Methods[row.name]) != row.width {
-			t.Fatal("Auth fixture wire/INS changed")
+			t.Fatal("storage fixture wire/INS changed")
 		}
 		body := javaMethodBody(t, src, "handle"+strings.ToUpper(row.name[:1])+row.name[1:])
 		if !strings.Contains(body, fmt.Sprintf("if (produced != %d)", row.width)) || strings.Contains(body, "new ") {
-			t.Fatal("Auth writer wiring")
+			t.Fatal("storage writer wiring")
 		}
 	}
 	if !strings.Contains(src, "public final short dispatchTo(") || !strings.Contains(src, "public final short dispatchStreamTo(") {

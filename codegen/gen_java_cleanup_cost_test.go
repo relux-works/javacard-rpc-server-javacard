@@ -9,8 +9,8 @@ import (
 
 // Actual jCardSim runs the generated example in four workloads, with an
 // instrumented logical-store/call observer. Sizes are example-specific: 1792 B
-// provisioning, 320 B issuance, 896 B abandoned partial request. The real Auth
-// fixture is a separate lane; these handlers are never labeled as Auth.
+// request exchange, 320 B append, 896 B abandoned partial request. The independent
+// SampleStore allocation fixture is a separate lane.
 func TestPersistentCleanupExampleComparison(t *testing.T) {
 	jar := simulatorJar(t)
 	for _, mode := range append([]string{""}, cleanupModes...) {

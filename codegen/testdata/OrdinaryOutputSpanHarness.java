@@ -186,10 +186,10 @@ public final class OrdinaryOutputSpanHarness {
             for(short i=0;i<cap;i++)out[(short)(off+i)]=(byte)(i+ins);
             return forced==Integer.MIN_VALUE?cap:(short)forced;
         }
-        protected short onGetAuthenticationIdentity(byte[] out,short off,short cap, byte[] callerWorkspace, short callerWorkspaceOffset, short callerWorkspaceCapacity){return fill(out,off,cap,1);}
-        protected short onGetAuthAppletInfo(byte[] out,short off,short cap, byte[] callerWorkspace, short callerWorkspaceOffset, short callerWorkspaceCapacity){return fill(out,off,cap,2);}
-        protected short onGetIssuer190(byte[] out,short off,short cap, byte[] callerWorkspace, short callerWorkspaceOffset, short callerWorkspaceCapacity){return fill(out,off,cap,3);}
-        protected short onGetIssuer177(byte[] out,short off,short cap, byte[] callerWorkspace, short callerWorkspaceOffset, short callerWorkspaceCapacity){return fill(out,off,cap,4);}
+        protected short onReadRecord(byte[] out,short off,short cap, byte[] callerWorkspace, short callerWorkspaceOffset, short callerWorkspaceCapacity){return fill(out,off,cap,1);}
+        protected short onReadStatistics(byte[] out,short off,short cap, byte[] callerWorkspace, short callerWorkspaceOffset, short callerWorkspaceCapacity){return fill(out,off,cap,2);}
+        protected short onReadLargeRecord190(byte[] out,short off,short cap, byte[] callerWorkspace, short callerWorkspaceOffset, short callerWorkspaceCapacity){return fill(out,off,cap,3);}
+        protected short onReadLargeRecord177(byte[] out,short off,short cap, byte[] callerWorkspace, short callerWorkspaceOffset, short callerWorkspaceCapacity){return fill(out,off,cap,4);}
         protected byte onScalar0(byte[] callerWorkspace, short callerWorkspaceOffset, short callerWorkspaceCapacity){calls++;return (byte)0xFE;}
         protected boolean onScalar1(byte[] callerWorkspace, short callerWorkspaceOffset, short callerWorkspaceCapacity){calls++;return true;}
         protected short onScalar2(byte[] callerWorkspace, short callerWorkspaceOffset, short callerWorkspaceCapacity){calls++;return (short)0x1234;}

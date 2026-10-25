@@ -1,0 +1,245 @@
+{
+  "Applet": {
+    "Name": "SampleStore",
+    "Description": "Synthetic bounded record and page storage interface",
+    "Version": "1.0.0",
+    "AID": "F053544F524501",
+    "CLA": 178,
+    "StreamWorkspace": ""
+  },
+  "Methods": {
+    "appendPages": {
+      "Name": "appendPages",
+      "INS": 34,
+      "Description": "",
+      "Request": {
+        "Fields": [
+          {
+            "Name": "pages",
+            "Type": "stream",
+            "Length": null,
+            "FixedLength": 0,
+            "MaxLength": 768,
+            "ChunkSize": 128,
+            "Location": "data"
+          }
+        ]
+      },
+      "Response": {
+        "Fields": [
+          {
+            "Name": "pageCount",
+            "Type": "u32",
+            "Length": null,
+            "FixedLength": 0,
+            "MaxLength": 0,
+            "ChunkSize": 0,
+            "Location": ""
+          }
+        ]
+      }
+    },
+    "enumeratePages": {
+      "Name": "enumeratePages",
+      "INS": 66,
+      "Description": "",
+      "Request": {
+        "Fields": [
+          {
+            "Name": "selection",
+            "Type": "stream",
+            "Length": null,
+            "FixedLength": 0,
+            "MaxLength": 256,
+            "ChunkSize": 128,
+            "Location": "data"
+          }
+        ]
+      },
+      "Response": {
+        "Fields": [
+          {
+            "Name": "pages",
+            "Type": "stream",
+            "Length": null,
+            "FixedLength": 0,
+            "MaxLength": 512,
+            "ChunkSize": 128,
+            "Location": ""
+          }
+        ]
+      }
+    },
+    "exchangePages": {
+      "Name": "exchangePages",
+      "INS": 18,
+      "Description": "",
+      "Request": {
+        "Fields": [
+          {
+            "Name": "pages",
+            "Type": "stream",
+            "Length": null,
+            "FixedLength": 0,
+            "MaxLength": 1536,
+            "ChunkSize": 128,
+            "Location": "data"
+          }
+        ]
+      },
+      "Response": {
+        "Fields": [
+          {
+            "Name": "pages",
+            "Type": "stream",
+            "Length": null,
+            "FixedLength": 0,
+            "MaxLength": 1024,
+            "ChunkSize": 128,
+            "Location": ""
+          }
+        ]
+      }
+    },
+    "readRecord": {
+      "Name": "readRecord",
+      "INS": 3,
+      "Description": "",
+      "Request": null,
+      "Response": {
+        "Fields": [
+          {
+            "Name": "payload",
+            "Type": "bytes_fixed",
+            "Length": null,
+            "FixedLength": 120,
+            "MaxLength": 0,
+            "ChunkSize": 0,
+            "Location": ""
+          },
+          {
+            "Name": "sequence",
+            "Type": "u32",
+            "Length": null,
+            "FixedLength": 0,
+            "MaxLength": 0,
+            "ChunkSize": 0,
+            "Location": ""
+          },
+          {
+            "Name": "used",
+            "Type": "u16",
+            "Length": null,
+            "FixedLength": 0,
+            "MaxLength": 0,
+            "ChunkSize": 0,
+            "Location": ""
+          },
+          {
+            "Name": "flags",
+            "Type": "u8",
+            "Length": null,
+            "FixedLength": 0,
+            "MaxLength": 0,
+            "ChunkSize": 0,
+            "Location": ""
+          }
+        ]
+      }
+    },
+    "readStatistics": {
+      "Name": "readStatistics",
+      "INS": 4,
+      "Description": "",
+      "Request": null,
+      "Response": {
+        "Fields": [
+          {
+            "Name": "recordCount",
+            "Type": "u32",
+            "Length": null,
+            "FixedLength": 0,
+            "MaxLength": 0,
+            "ChunkSize": 0,
+            "Location": ""
+          },
+          {
+            "Name": "pageCount",
+            "Type": "u32",
+            "Length": null,
+            "FixedLength": 0,
+            "MaxLength": 0,
+            "ChunkSize": 0,
+            "Location": ""
+          },
+          {
+            "Name": "revision",
+            "Type": "u32",
+            "Length": null,
+            "FixedLength": 0,
+            "MaxLength": 0,
+            "ChunkSize": 0,
+            "Location": ""
+          },
+          {
+            "Name": "flags",
+            "Type": "u8",
+            "Length": null,
+            "FixedLength": 0,
+            "MaxLength": 0,
+            "ChunkSize": 0,
+            "Location": ""
+          }
+        ]
+      }
+    },
+    "summarizePages": {
+      "Name": "summarizePages",
+      "INS": 50,
+      "Description": "",
+      "Request": {
+        "Fields": [
+          {
+            "Name": "pages",
+            "Type": "stream",
+            "Length": null,
+            "FixedLength": 0,
+            "MaxLength": 1024,
+            "ChunkSize": 128,
+            "Location": "data"
+          }
+        ]
+      },
+      "Response": {
+        "Fields": [
+          {
+            "Name": "summary",
+            "Type": "bytes_fixed",
+            "Length": null,
+            "FixedLength": 16,
+            "MaxLength": 0,
+            "ChunkSize": 0,
+            "Location": ""
+          }
+        ]
+      }
+    }
+  },
+  "StatusWords": {
+    "SW_INVALID_DATA": {
+      "Name": "SW_INVALID_DATA",
+      "Code": 27264,
+      "Description": "Invalid record or page data"
+    },
+    "SW_INVALID_LENGTH": {
+      "Name": "SW_INVALID_LENGTH",
+      "Code": 26368,
+      "Description": "Invalid record or page length"
+    },
+    "SW_WRONG_STATE": {
+      "Name": "SW_WRONG_STATE",
+      "Code": 27013,
+      "Description": "Page transfer is not active"
+    }
+  }
+}

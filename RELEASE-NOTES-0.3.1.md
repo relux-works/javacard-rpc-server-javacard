@@ -45,14 +45,10 @@ names are unchanged.
   `pluginapi v0.1.1` without a local replacement.
 
 See [cleanup contract and measured costs](PERSISTENT-WORKSPACE-COSTS.md) for the
-full example and real Auth comparison, exact source/tool identities, RAM, CAP
-and call inventories. The selected whole mode preserves raw handlers with a
-2 B transient-state increase. The rejected writer experiment required a 2048 B
-staging arena; its measurements remain historical evidence and its API does
-not ship. Auth observed stores cover instrumented Auth/generated primitive
-array writes into owned persistent arrays, including deselect; provider-origin
-output writes are outside that observer and have separately stated bounds.
-The table therefore does not claim exact all-origin NVM savings.
+synthetic example, source/tool identities, CAP and call inventories. The
+selected whole mode preserves raw handlers with a 2 B transient-state increase.
+Consumer-specific comparisons are excluded. The example's logical array-store
+observer does not establish exact all-origin NVM savings.
 
 ## Validation and limits
 
@@ -60,9 +56,8 @@ The backend requires Go 1.25+. The root runtime uses JDK 17, Gradle 8.12,
 Java 8 source/bytecode compatibility and `com.klinec:jcardsim:3.0.5.9`.
 Retained native evidence covers real simulator lifecycle/refusal/reset,
 allocation and narrowing controls, four default/whole CAP converter/verifier
-variants, and byte identity with the measured whole Auth generated sources.
-The Auth comparison uses its documented Relux jCardSim `3.0.5.9-relux.2`
-identity; the generated example uses the separate `relux.1` lane.
+variants. The generated example uses its documented `relux.1` simulator lane;
+separate consumer evidence is not library qualification.
 
 These checks do not establish physical timing, endurance, total card NVM,
 engine-private RAM, torn-write atomicity or physical-card installation.

@@ -24,13 +24,13 @@ type parityMatrix struct {
 	Cases                                                          []parityCase
 }
 
-// This independent release matrix pins the Java projection of every core IDL,
-// workspace, lifecycle, simulator coordinate and namespace combination. The
-// authorized v0.5.0 API break has a separate projection of skeleton/endpoint/
-// runtime/adapter; other files still match the independent release. Source
-// projection hashes freeze a reviewed delta, not independent behavioral proof.
-// This is source parity, not wire
-// execution. JVM wire witnesses exercise dispatchTo in the release lane.
+// This is a mixed-provenance matrix. parity-v0.4.5.json retains actual generation
+// by the historical generator, including the later-authored SampleStore input.
+// For every row, Skeleton, StreamEndpoint, BoundedStreamRuntime and
+// StreamAPDUAdapter expectations are instead taken from the current-source
+// caller-workspace-v0.5.0.json receipt. Only the other files are compared with
+// retained historical generation. Current-source receipts prove source
+// consistency, not historical byte identity or behavioral/wire equivalence.
 func TestPluginReleasedV045Parity(t *testing.T) {
 	b, e := os.ReadFile("testdata/parity-v0.4.5.json")
 	if e != nil {
@@ -85,11 +85,13 @@ func TestPluginReleasedV045Parity(t *testing.T) {
 			for i, f := range files {
 				sum := sha256.Sum256(f.Data)
 				want := tc.Files[i].SHA256
+				provenance := "retained historical generation"
 				if strings.HasSuffix(f.Name, "Skeleton.java") || strings.HasSuffix(f.Name, "StreamEndpoint.java") || strings.HasSuffix(f.Name, "BoundedStreamRuntime.java") || strings.HasSuffix(f.Name, "StreamAPDUAdapter.java") {
 					want = writerHashes[key+"|"+f.Name]
+					provenance = "current-source projection"
 				}
 				if f.Name != tc.Files[i].Name || hex.EncodeToString(sum[:]) != want {
-					t.Fatalf("release byte/order drift at file %d: %s", i, f.Name)
+					t.Fatalf("%s byte/order drift at file %d: %s", provenance, i, f.Name)
 				}
 			}
 			after, e := json.Marshal(s)
@@ -102,7 +104,7 @@ func TestPluginReleasedV045Parity(t *testing.T) {
 		})
 	}
 	// Counts alone cannot prove the cross product: independently require all rows.
-	for _, fixture := range []string{"counter", "stream", "example-counter", "bsim-auth"} {
+	for _, fixture := range []string{"counter", "stream", "example-counter", "sample-store"} {
 		s, e := ParseFile("testdata/" + fixture + ".json")
 		if e != nil {
 			t.Fatal(e)

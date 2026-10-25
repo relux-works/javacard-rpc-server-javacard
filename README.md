@@ -1,5 +1,11 @@
 # javacard-rpc-server-javacard
 
+The ModeStore stream-mode fixture uses independent circular-store seeks,
+page preview and page description. BatchStore fixture responses encode their
+declared scalar fields, including canonical booleans. See
+[`codegen/testdata/README.md`](codegen/testdata/README.md) for fixture contracts
+and the split between historical generation and current-source receipts.
+
 Java Card code-generation backend and on-card runtime for
 [javacard-rpc](https://github.com/relux-works/javacard-rpc). The root repository tag
 versions both components: the Go backend lives in codegen/ and the Java runtime
@@ -114,8 +120,8 @@ continue using fields such as output, produced, result and payloadOffset.
 Ensure java and javac on PATH match the selected native lane. Relux jCardSim is
 required for the CLEAR_ON_RESET digest variant; upstream 3.0.5.9 refuses that
 construction. To also exercise the pinned consumer allocation test, set
-JCRPC_ALLOCATION_IDL=testdata/bsim-auth.json and JCRPC_ALLOCATION_BASELINE to the
-independent released Java source directory with package io.jcrpc.bsim. The root
+JCRPC_ALLOCATION_IDL=testdata/sample-store.json and JCRPC_ALLOCATION_BASELINE to the
+independent released Java source directory with package io.jcrpc.store. The root
 runtime is tested through Simulator.transmitCommand and AppletBase.process.
 Unset native toolchain variables explicitly skip optional native tests; required
 Make lanes refuse missing configuration. A default Go pass alone does not claim

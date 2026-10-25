@@ -3,7 +3,7 @@
 The measurements below describe the pre-ordinary-writer release and retained
 historical experiments. The ordinary Java source API has since migrated to
 caller-owned output spans; see [current writer target measurements and
-verification bounds](ORDINARY-OUTPUT-SPANS.md#current-target-measurements).
+verification bounds](ORDINARY-OUTPUT-SPANS.md#measurement-scope).
 
 The explicit Applet.StreamWorkspaceCleanup selector supports only
 whole-reply-area, and requires Applet.StreamWorkspace == "persistent".
@@ -33,10 +33,9 @@ The 2026-10-08 release decision keeps whole-reply-area and rejects
 written-bytes-only. The tables retain the measured three-mode experiment,
 including the rejected confined Input/Writer implementation. Those types,
 methods, state and source branches have been removed from the shipping backend.
-The historical writer bridged real Auth SDK array APIs with a 2048 B transient
-staging arena. It reduced observed stores on some workloads but added 2062 B attributed RAM
-against baseline; provisioning wrote 103 B more than whole reply. Whole reply
-preserves the raw handler API with a 2 B transient-state increase.
+Consumer-specific writer experiments and their measurements are excluded from
+this library contract. Whole reply preserves the raw handler API with a 2 B
+transient-state increase.
 
 ## Counting scope and reproducibility
 
@@ -79,8 +78,8 @@ written-byte rows are historical results from the pre-removal generator and
 fixture; they do not describe a supported selector.
 
 The example's request/response limit is 1792 B, chunk size 192 B. Provisioning
-runs 1792 B in / 1792 B reversed out. Issuance uses 320 B in / 320 B reversed out,
-which differs explicitly from Auth's certificate/admission workflow. Failure
+runs 1792 B in / 1792 B reversed out. Issuance uses 320 B in / 320 B reversed out.
+These are synthetic reverse-buffer workloads, not consumer operations. Failure
 buffers 896 B and explicitly aborts before handler entry. Untouched runs SELECT
 and an ordinary generated version read, then deselects. Each workload has a
 fresh simulator installation and ends with actual deselection/reselection.
@@ -130,93 +129,8 @@ physical headers are not included in array payload. It expanded an existing
 short array by 12 B and the existing reference array by one slot; whole reply
 expands the short array by 2 B. Command-path array inventory remains unchanged.
 
-## Real Auth historical comparison and selected whole mode
+## Consumer measurements
 
-Real Auth runs CardSimulator.transmitCommand -> BSimAuthApplet.process ->
-generated dispatch -> actual Auth operations on released KeyVault/crypto.
-Five session classes include actual deselect. Setup/installation are outside the
-measurement window. Valid payloads replace earlier capacity-only proposals:
-311/305 B challenge/session, 1330 B signed bootstrap, accepted 640 B Cert_sim,
-172 B possession, 224 B anchor and 155 B admission, plus actual Cert_adm and
-footprint. Failure aborts after 384 B of a genuine 579/580 B leaf, then proves
-idempotent recovery; it is not exactly half. 641/2048 B refusals are negative
-tests, not successful workloads. Random card keys/signatures cause 1 B DER
-variation; wire format and product semantics are checked, not cross-card byte
-equality of random ciphertext.
-
-NVM here is logical primitive-array payload stores by instrumented
-Auth/generated code into Auth-owned persistent arrays, including same-valued
-zeros and successful copies. Workspace is separate; issuance adds 409 B in other
-owned arrays. Released KeyVault/crypto, primitive persistent fields,
-allocation/initialization and platform internals are excluded. Provider-origin
-stores outside the observed class inventory are outside this metric: it is not
-a total card or all-origin NVM measurement. There is no separately measured Auth
-reset sweep or data/cleanup split; no category is inferred from a formula.
-The native lifecycle separately proves the retained full reset sweep.
-
-Auth RAM is TransientLedger attributed arrays/transient key containers, including
-2 B reference slots; example RAM above counts primitive payload and reports
-reference slots separately. Engine-private/temporary RAM and object headers are
-excluded. Auth CAP is GP Load File Data Block bytes excluding Descriptor.cap;
-example CAP above inventories uncompressed components and ZIP, so the columns
-have different scopes. Calls count Auth/generated method entries per APDU,
-excluding libraries/platform and SELECT/deselect. Exact total/APDU ratios and
-ranges are shown.
-
-| Workload | Mode | Valid input | Real output | Observed Auth stores | Observed workspace stores | Auth RAM | Auth CAP | APDUs | Calls/APDU mean (range; total/APDUs) |
-| --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | --- |
-| plain-authentication | v0.4.6 | 311+305 B | 73+73 B | 5000 B | 5000 B | 1797 B | 30541 B | 6 | 45.00 (19..95; 270/6) |
-| plain-authentication | whole-reply-area | 311+305 B | 73+73 B | 1520 B | 1520 B | 1799 B | 30653 B | 6 | 46.00 (20..96; 276/6) |
-| plain-authentication | written-bytes-only (rejected) | 311+305 B | 73+73 B | 1378 B | 1378 B | 3859 B | 32565 B | 6 | 57.33 (20..130; 344/6) |
-| provisioning | v0.4.6 | 1330 B | 1283 B | 6144 B | 6144 B | 1829 B | 30541 B | 16 | 131.19 (19..1796; 2099/16) |
-| provisioning | whole-reply-area | 1330 B | 1283 B | 3840 B | 3840 B | 1831 B | 30653 B | 16 | 131.69 (20..1797; 2107/16) |
-| provisioning | written-bytes-only (rejected) | 1330 B | 1283 B | 3943 B | 3943 B | 3891 B | 32565 B | 16 | 133.81 (20..1831; 2141/16) |
-| issuance | v0.4.6 | 640+172+224+155 (+485 Cert_adm) B | 36+73+38+1023 (+190 footprint+36 Cert_adm) B | 15722 B | 15313 B | 1797 B | 30541 B | 24 | 109.00 (21..967; 2616/24) |
-| issuance | whole-reply-area | 640+172+224+155 (+484 Cert_adm) B | 36+73+38+1022 (+190 footprint+36 Cert_adm) B | 6360 B | 5951 B | 1799 B | 30653 B | 24 | 109.67 (21..968; 2632/24) |
-| issuance | written-bytes-only (rejected) | 640+172+224+155 (+485 Cert_adm) B | 36+73+38+1023 (+190 footprint+36 Cert_adm) B | 5835 B | 5426 B | 3859 B | 32565 B | 24 | 116.75 (21..1002; 2802/24) |
-| untouched-identity | v0.4.6 | 0 B | 127 B | 2048 B | 2048 B | 1797 B | 30541 B | 1 | 32.00 (32..32; 32/1) |
-| untouched-identity | whole-reply-area | 0 B | 127 B | 0 B | 0 B | 1799 B | 30653 B | 1 | 32.00 (32..32; 32/1) |
-| untouched-identity | written-bytes-only (rejected) | 0 B | 127 B | 0 B | 0 B | 3859 B | 32565 B | 1 | 32.00 (32..32; 32/1) |
-| failure-mid-leaf | v0.4.6 | 384 of 580 B | 0 B | 4480 B | 4480 B | 1797 B | 30541 B | 3 | 22.67 (21..25; 68/3) |
-| failure-mid-leaf | whole-reply-area | 384 of 580 B | 0 B | 768 B | 768 B | 1799 B | 30653 B | 3 | 23.33 (22..25; 70/3) |
-| failure-mid-leaf | written-bytes-only (rejected) | 384 of 579 B | 0 B | 768 B | 768 B | 3859 B | 32565 B | 3 | 23.33 (22..25; 70/3) |
-
-Measurement identity: immutable Auth base jc
-1c51cca5129210b5404b481f850e512832cb88d3; isolated signed comparison fixture
-124a24f2bfc84d7bb27d93400c073eda2ddae268; bsim-id
-0e478af50d998250b41d6e292d1a3a5009052552 and unchanged IDL blob
-1797ac2e56e4a81cf9fc896568bd31b22dec8b10. Baseline generator is released facade
-v0.4.6 at 995513e85e601759dadbe496d9897c36ec4d5a82. Auth uses macOS arm64,
-JDK17 17.0.18, Gradle 9.2.1 and jCardSim 3.0.5.9-relux.2 (JAR SHA-256
-485617e913bef9803404d32d2d4f36b5410bf7d298c3ff147e0e1b4d27d3262a).
-CAP uses JDK11 and SDK 3.2 converter targeting JC 3.0.5 with the pinned
-GlobalPlatform imports. This is distinct from the example relux.1/SDK3.0.5u4
-lane. The earlier relux.3 migration event is not comparison evidence.
-
-Reported upper bounds on omitted whole-mode library output stores are 146 B
-for plain authentication, 1283 B provisioning and approximately 1170 B plus
-footprint for issuance (exact components and DER variation above); untouched
-and failure omit 0 B. These are bounds, not manufactured actual store counts.
-Whole-versus-writer NVM differences are not exact all-origin totals. The owner
-selected whole reply: the rejected writer adds 2060 B attributed RAM and 1912 B
-CAP against whole mode. No universal percentage reduction is claimed.
-
-| Auth generated Java sources, five files | Default | Whole reply | Written bytes (rejected) |
-| --- | ---: | ---: | ---: |
-| Source bytes | 58659 B | 59570 B | 63426 B |
-
-The narrowed whole-only generator emits the exact five measured Auth Java
-sources (59570 B), verified by TestPersistentCleanupWholeMeasuredAuthIdentity
-through Plugin.Generate. Runtime SHA-256 is
-5063f440b42c08619274cd16206541c55c98004acd3e3c8b727c26e9af9fb90f;
-all five hashes are asserted. This output identity reuses the measured whole
-CAP/session data despite removal of inactive writer source. Historical fixture
-reports 173 green Auth tests, 19 killed narrowing controls and three verified CAP
-builds; writer-specific tests and RAM are historical, not shipping behavior.
-The request observer omitting exactly offsets768..959 fails the named
-provisioning counter assertion (1330 versus1138); a frontier384 wipe narrowed to
-192 fails failureMidLeaf workspace residue. No omitted store is inferred from
-a successful status alone.
-
-No simulator timing is measured. Physical timing, endurance, total physical RAM,
-torn-write behavior and NovaCard remeasurement remain consumer physical-card work.
+Consumer measurements belong to their own workspaces. The synthetic generator
+examples above establish only their declared observation boundaries; they do
+not establish another application's memory, storage or hardware behavior.

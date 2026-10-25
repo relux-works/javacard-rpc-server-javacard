@@ -3,8 +3,9 @@
 `Method.StreamMode` (IDL `stream_mode`, pluginapi v0.1.2) selects a stream
 contract per method inside the `authenticated-invalidate` runtime. A method
 without a mode keeps the [authenticated contract](AUTHENTICATED-INVALIDATE.md).
-Schemas with no mode generate exactly the same files as before; that is
-pinned by `TestStreamModesKeepAuthenticatedOutput`.
+The current-source projections for independent schemas without modes are
+pinned by `TestStreamModesKeepAuthenticatedOutput`; this is a source freeze,
+not historical release equivalence.
 
 | Mode | Authentication | Request bytes | Result | Persistent writes |
 | --- | --- | --- | --- | --- |
@@ -12,9 +13,13 @@ pinned by `TestStreamModesKeepAuthenticatedOutput`.
 | `public-invalidate` | not required | staged in the persistent workspace | short as above, or streamed: produced into RAM on every read, never stored | accepted chunks (and a short receipt) only |
 | `chunked` | not required | never staged: each chunk goes to the handler and a running digest | short, written by the handler into the caller's RAM span, or streamed: produced into RAM on every read from handler-held state and read-only records, never stored | none, on any APDU |
 
-REV4 Auth assignment (owner decision; Auth adoption is downstream work):
-provisioning INS 0x10 is `public-invalidate`; signatures INS 0x20/0x30/0x40
-and admission INS 0x70 are `chunked`; issuer methods keep no mode.
+Mode assignment belongs to the consuming schema. ModeStore previews a reversed
+page, describes an authenticated page with length and SHA-256, inspects a raw
+u16 relative-seek vector, and reads a circular window from a read-only store.
+Inspection returns three u16 values (word count, cursor and word XOR); the
+streamed window contains only stored bytes. FFFF seeks and partial words are
+refused. Its independent storage contract is documented in
+`codegen/testdata/README.md`.
 
 ## Selection and refusals
 
@@ -80,8 +85,7 @@ calls `Produce` again for that chunk. `input` is the staged request and is
 read-only.
 
 `Produce` must return the same bytes every time within one prepared session.
-Keep anything that cannot be recomputed (for example a randomized ECDSA
-signature) in handler-owned RAM from `Prepare`. The card cannot check
+Keep the result's session state in handler-owned RAM from `Prepare`. The card cannot check
 determinism; the host does, because the bytes it reads must match the
 descriptor digest it received at CLOSE_WRITE. `TestStreamModesRealSimulator`
 shows a drifting producer being caught by that check.
@@ -129,21 +133,19 @@ protected abstract void on<Method>Produce(short resultOffset,
 ```
 
 Chunks arrive exactly once and in order, read-only, from the caller's request
-span. `packetIndex == 0` starts a new request: reset the parser and call
-`Signature.init` there. Feed each chunk to `Signature.update` and parse fields
-with a small RAM state machine. `Finish` runs only after every chunk arrived
+span. `packetIndex == 0` starts a new request: reset the handler's reducer
+there. ModeStore consumes relative seeks with four transient shorts and rejects
+the reserved word FFFF. `Finish` runs only after every chunk arrived
 and the runtime's running SHA-256 matched the CLOSE digest; it writes the
-short result (for Auth, the single 73 B `signatureLength || signatureDerPadded`)
+short result
 into the admitted RAM response span.
 
 A chunked streamed result has no staged input: `Prepare` runs after the digest
 matched, keeps what the result needs in handler RAM and returns the total
 length; `Produce` then writes result bytes into the admitted RAM span for the
 result digest and on every READ_CHUNK, under the same determinism contract as
-the public producer. For Auth admission (INS 0x70) that is the 73 B signature
-record held in RAM from `Prepare`, followed by Cert_adm evidence read in place
-from its persistent record (AUTH 0x0011): no staging copy of the transcript,
-the signature or the certificate.
+the public producer. ModeStore retains only its reduced cursor and reads the
+selected circular window in place.
 
 Two choices follow from staging nothing:
 
@@ -166,40 +168,14 @@ last one cut to exactly the maximum; after a short middle chunk it is the valid
 witness: it refuses `6985` on any incomplete stream, live or dead, and clears a
 live one.
 
-## Measurements
+## Synthetic simulator checks
 
-jCardSim 3.0.5.9-relux.1, both lifecycle choices, adapter route and the
-Auth-shaped direct route over one APDU buffer. The ledger counts every array
-element store in the generated sources and the fixture handlers, classified by
-array identity; same-value stores count. Fixture `Rev4Shape`
-(`codegen/testdata/Rev4Shape*.java`).
-
-| Workload | Logical persistent stores |
-| --- | ---: |
-| Chunked ECDSA over a 194 B transcript (2 chunks) + 73 B response | 0 B on every APDU |
-| Chunked ECDSA over 2048 B (11 chunks) + 73 B response | 0 B on every APDU |
-| Chunked admission: ECDSA over a 320 B transcript, result signature + 600 B Cert_adm (673 B, 4 reads) | 0 B on every APDU |
-| Chunked admission at the 1408 B result maximum (signature + 1335 B Cert_adm, 8 reads) | 0 B on every APDU |
-| Public 320 B upload, 320 B streamed result (2 reads), CLOSE_READ | 320 B (upload only) |
-| Public 1792 B upload, 1792 B streamed result (10 reads) | 1792 B (upload only) |
-| Issuer 197 B upload + 36 B receipt | 233 B |
-| Every refusal, ABORT, deselect, reset, read retry, CLOSE_READ retry | 0 B each |
-
-Reachable generated array payload for the real Auth fixture on jCardSim,
-clear-on-reset (`TestStreamModesAllocationPayload`):
-
-| Shape | Skeleton-reachable transient | Persistent (workspace + tables) | Workspace |
-| --- | ---: | ---: | ---: |
-| `authenticated-invalidate`, Auth without its two response streams | 72 B | 2132 B | 2048 B |
-| REV4 modes, full Auth IDL (9 streamed methods) | 74 B | 2165 B | 2048 B |
-
-The 2 B RAM delta is the mode scalar. The 33 B persistent delta is install-time
-tables (two INS bases, two direction bytes, two limit rows, nine mode bytes),
-never written per command. The streamed results (1792 B and 1408 B declared)
-take no generated RAM or NVM: they live in the caller's response span. The
-generated adapter adds its 255 B transient I/O array if the applet constructs
-it. Object headers, provider and JCRE arrays are excluded. This is a generator
-payload, not a card total.
+The mode fixture exercises adapter and direct dispatch over one APDU buffer.
+The ledger counts primitive array stores by identity, including repeated-value
+stores. Positive and negative controls establish that its declared observation
+boundary is active. The SampleStore allocation test separately compares upload
+and bidirectional-stream schemas. Rerun these tests for the accepted source;
+source projection hashes do not replay measurements.
 
 ## Not established here
 
@@ -212,8 +188,8 @@ payload, not a card total.
 - Route B (Security Domain selected): `APDU.getCurrentAPDUBuffer()` is not
   available, so the consumer must pass transient spans. jCardSim does not
   enforce that context.
-- Physical-card behavior, the Auth transcript parser, Auth provisioning and
-  admission producers and their determinism are downstream consumer work.
+- Physical-card behavior, consumer parsers, provisioning workflows and
+  producer determinism are downstream consumer work.
 
 ## Evidence
 
@@ -221,8 +197,8 @@ payload, not a card total.
 
 - `TestStreamModeValidation`, `TestStreamModeGenerationNarrowingMutants` (two
   Go mutants, each admitting one INS in one refused class);
-- `TestStreamModesKeepAuthenticatedOutput` (L2 and released Auth outputs
-  byte-identical, with a positive control);
+- `TestStreamModesKeepAuthenticatedOutput` (current-source BatchStore and
+  SampleStore projections, with a mode-changing positive control);
 - `TestStreamModesSourceContract` and `TestStreamModesTokenPreservingMutant`;
 - `TestStreamModesRealSimulator` (the scenario above);
 - `TestStreamModesLedgerControls` (a same-value 1 B persistent store planted on
@@ -235,7 +211,7 @@ payload, not a card total.
   live issuer upload, the caller-workspace half of CLOSE and READ output
   admission, and keeps-handle mutants that keep the refusal status and its 0 B
   but leave the stream live after a request-total refusal (per mode), a
-  mid-stream shape refusal (all modes, public, admission) and a mid-stream
+  mid-stream shape refusal (all modes, public, window read) and a mid-stream
   handler failure);
 - `TestStreamModesAllocationPayload` and `TestStreamModesClassicCAP` (Classic
-  3.0.5u4 conversion with a fixture using every callback and `Signature.update`).
+  3.0.5u4 conversion with a fixture using every callback and page hashing).

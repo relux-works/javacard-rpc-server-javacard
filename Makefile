@@ -19,7 +19,7 @@ test-cap:
 
 test-simulator:
 	@test -n "$(JCRPC_JCARDSIM_JAR)" || { echo "JCRPC_JCARDSIM_JAR is required" >&2; exit 2; }
-	go test ./codegen -run 'TestRootAppletBaseRealSimulator|TestGeneratedWorkspaceRealSimulator|TestGeneratedOrdinaryOutputSpanRealSimulator|TestCallerWorkspaceRealSimulator|TestAllocationInstrumentRejectsNarrowingPlant|TestBSimAuthGeneratedAllocationPayload|TestPersistentCleanup(RealLifecycle|NarrowingMutants|Example)|TestAuthenticatedInvalidate(RealSimulator|LedgerControls|NarrowingMutants|TokenPreservingMutant|AllocationPayload)|TestStreamModes(RealSimulator|LedgerControls|NarrowingMutants|TokenPreservingMutant|AllocationPayload)' -count=1 -v
+	go test ./codegen -run 'TestRootAppletBaseRealSimulator|TestGeneratedWorkspaceRealSimulator|TestGeneratedOrdinaryOutputSpanRealSimulator|TestCallerWorkspaceRealSimulator|TestAllocationInstrumentRejectsNarrowingPlant|TestSampleStoreGeneratedAllocationPayload|TestPersistentCleanup(RealLifecycle|NarrowingMutants|Example)|TestAuthenticatedInvalidate(RealSimulator|LedgerControls|NarrowingMutants|TokenPreservingMutant|AllocationPayload)|TestStreamModes(RealSimulator|LedgerControls|NarrowingMutants|TokenPreservingMutant|AllocationPayload)' -count=1 -v
 
 # Inspected source/Go-only lane: no test selected here invokes a JVM/CAP tool.
 .PHONY: test-source

@@ -3,8 +3,13 @@
 `stream_workspace = "persistent"` plus
 `stream_workspace_cleanup = "authenticated-invalidate"` selects a stream runtime
 whose persistent workspace is reachable only from an authenticated APDU and
-whose refusals never write it. The selector is additive: the empty selector and
-`whole-reply-area` generate byte-identical sources to v0.5.0.
+whose refusals never write it. Empty and `whole-reply-area` selectors retain
+their separate contracts. The source tests do not establish blanket byte
+identity with v0.5.0: skeleton, endpoint, bounded-runtime and APDU-adapter
+comparisons use current-source projection receipts. The other matrix files
+use retained actual historical generation in `parity-v0.4.5.json`, including
+the separately identified SampleStore generation by that historical generator.
+See `codegen/testdata/README.md` for the provenance split.
 
 ## Contract
 
@@ -108,9 +113,9 @@ clears them. No erasure is claimed.
 
 ## Measurements
 
-Generated example `AuthShape` on jCardSim 3.0.5.9-relux.1 through
+Independent `BatchStore` fixture on jCardSim 3.0.5.9-relux.2 through
 `Simulator.transmitCommand -> Applet.process`, on both the generated adapter and
-an Auth-shaped direct `dispatchStreamTo` over one APDU buffer, both lifecycle
+a caller-owned direct `dispatchStreamTo` over one APDU buffer, both lifecycle
 choices. The ledger counts every array element store in generated sources and
 fixture handlers, classified by array identity (`JCSystem.isTransient`, APDU
 buffer). Same-value stores count. JCRE transaction journaling, native crypto
@@ -118,39 +123,31 @@ state and physical EEPROM endurance are outside this count.
 
 | Workload | Logical persistent stores |
 | --- | ---: |
-| 197 B request (192 + 5) + 73 B accepted result | 270 B |
-| 2048 B request (11 chunks) + 73 B accepted result | 2121 B |
-| 40 B request + 36 B accepted result | 76 B |
+| 137 B request (128 + 9) + 29 B accepted result | 166 B |
+| 1537 B request (13 chunks) + 29 B accepted result | 1566 B |
+| 40 B request + 11 B accepted result | 51 B |
 | Every refused APDU listed above, ABORT, deselect, reset, retries | 0 B each |
 | CLOSE with a persistent response or caller workspace (handler set to fail, and to succeed) | 0 B, handler not called |
 
-Reachable generated array payload for the request-only BSim Auth fixture
-(the Auth IDL without its two response streams), clear-on-reset:
-
-| Selector | Skeleton-reachable transient | Persistent (workspace + tables) | Generated adapter I/O (if constructed) |
-| --- | ---: | ---: | ---: |
-| `whole-reply-area` | 75 B | 2132 B | 255 B transient |
-| `authenticated-invalidate` | 72 B | 2132 B | 255 B transient |
-
-The 3 B saving is the dropped reset marker and dirty frontier. Object headers,
-provider/JCRE arrays and reference widths are excluded. This is a generator
-payload, not a whole-card RAM figure; a card total must add every applet's own
-measured reserve.
+The independent SampleStore allocation test compares the two selectors with
+the same request-only schema. It asserts the three-byte control-state delta
+separately from workspace and dispatch tables. This is generated-array payload,
+not a whole-card memory measurement.
 
 ## Evidence and limits
 
 Tests (`codegen/gen_java_authenticated_test.go`): selector refusals with a
-positive control; named response-stream refusal of the real Auth fixture;
+positive control; named response-stream refusal of the independent SampleStore fixture;
 source contract; the simulator scenario above; ledger controls (a planted
 same-value persistent store, also through an alias, fails the zero gate by name;
 a planted transient store passes); twenty runtime narrowing mutants (seven
 gate weakenings; one same-value persistent store planted on exactly one
 refusal or invalidation path each for bad CLOSE digest, ABORT, foreign method,
 handler failure, deselect, out-of-order retry and oversized declaration; four
-output-admission narrowings that admit a persistent span only for the sign
+output-admission narrowings that admit a persistent span only for the summary
 method, only as caller workspace, only for a 255 B array, or only on the
 receipt retry; two foreign-refusal narrowings that keep the handle only for
-the sign method, on WRITE and on CLOSE); two review regression witnesses
+the summary method, on WRITE and on CLOSE); two review regression witnesses
 (`TestReviewerPersistentResponseRefusal`, `TestReviewerForeignMethodInvalidates`); one
 token-preserving mutant and one generation-time Go mutant, each killed by a
 named assertion; allocation payload; Classic 3.0.5u4 CAP conversion with

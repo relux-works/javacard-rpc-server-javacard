@@ -1,0 +1,7 @@
+{
+  "SampleStoreBoundedStreamRuntime.java": "b3aee446cdb641eb782b0b39ad6163cc09cc35f03d49d437ed0a66239ad7948d",
+  "SampleStoreSkeleton.java": "56f9bd1efb9f845d71b7ce691fad57a0c5ab1c6c066200120b0a829d446da016",
+  "SampleStoreStreamAPDUAdapter.java": "2ac762415c199925c2629c1e2369f1093d846173c67409b8d9e1e03555ff8732",
+  "SampleStoreStreamEndpoint.java": "1d79cceef9c764d225f22d05482fa19e36ced3b95f0ffc982a6c592141024f68",
+  "SampleStoreTransport.java": "0733555548af2026c9c037429b6597d0408708867ca2227d0ef2256e25d7f6a7"
+}

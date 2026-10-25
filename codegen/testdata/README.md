@@ -1,57 +1,50 @@
-# Java Card regression fixtures
+# Compatibility fixtures
 
-The JSON schemas are frozen normalized models exported using `ParseFile` and
-`Validate` from core commit `ef6e04bfae8dab0f8e1ac40c9bb10713dbf09250`.
-They cover the complete core parity input set: the example counter, test counter,
-test stream, and the pinned bsim-auth IDL at B6 commit
-`2d23abdafa1e0f68c6003ab56274b2ac38378ef9` (original TOML SHA-256
-`1be1ed52ac9a85a62d5c5e371a9e22d38f834282681528476ca071e7bfc2cb66`).
-No parser is part of this backend module.
+The corpus contains the independent counter, bounded-stream, counter-example
+and synthetic SampleStore inputs. SampleStore is authored as record/page storage,
+not a consumer API. Its TOML SHA-256 is
+`46729b4e03cc71d6997de286c2361271a1c281fbc7839556c79de031a2b63847`.
 
-`parity-v0.4.5.json` pins hashes of every ordered package file obtained by running
-an independent CLI built from the signed published core `v0.4.5` tag. Its header
-records the release commit and binary SHA-256. Its 216 rows are the distinct
-JavaCard projection of the complete 720-cell core matrix: four inputs, three
-workspace policies, three lifecycle choices, three simulator options (default,
-explicit upstream, explicit Relux), and two namespaces (explicit and `--all`
-default). Duplicate Java selections in combined-target CLI cases collapse to
-these same rows. Tests compare the target's actual `Plugin.Generate` files.
-Empty simulator choices are expanded by the test consumer, as the facade does.
+Its baseline outputs were independently produced by signed facade v0.4.5
+(commit `cfed4182356a4f4609c88f58924aac79c05ae5b6`), executable SHA-256
+`adb7c8b8402413391eda07083dbe1512333e44fe4b00d10c2abd324b72bfedf6`.
+The Java matrix adds all54 workspace/lifecycle/simulator/namespace combinations.
+Kotlin packages retain both namespaces. Swift records the intended stream
+refusal. The other three inputs retain their existing baseline provenance.
 
-CLI help, selector dispatch, parsing/IDL validation, invalid CLI simulator syntax,
-and Kotlin/Swift output are owned by the facade and outside target extraction.
-Unknown workspace and transient-memory options are also checked directly against
-the plugin, requiring no partial package. Namespace/schema refusals have valid
-controls. The full raw CLI matrix remains a core compatibility test.
+Current source-projection receipts freeze a reviewed API delta only; they are
+not independent behavior, allocation or physical-device evidence. Package order,
+bytes/hashes, complete matrix coverage and input nonmutation remain tested.
 
-The Java golden files and JVM harnesses are maintained target fixtures. Original
-JavaCard regression test names are retained; their test-only generation helpers
-now unpack `Plugin.Generate` instead of calling renderer wrappers. The policy
-test drives backend policy refusal directly; it does not claim parser coverage.
-CAP and real simulator checks require explicit toolchain configuration and are
-separate from the JVM stand-in lane. No physical card or NVM endurance claim is
-made. Persistent cleanup remains exactly as v0.4.5; proportional wiping is deferred.
+`TestPluginReleasedV045Parity` uses two sources of expectations per row:
+`parity-v0.4.5.json` supplies retained historical generation for settings,
+build files and transports; `caller-workspace-v0.5.0.json` supplies current-source
+receipts for skeletons, stream endpoints, bounded runtimes and APDU adapters.
+The latter file's version-shaped name is not historical provenance.
+`sample-store-default-projection.json` and
+`sample-store-whole-projection.json` are also current-source receipts.
+None of these projection receipts may replace retained historical hashes.
 
-The v0.5.0 caller-workspace API separately freezes 540 changed file hashes across
-the same 216 rows in `caller-workspace-v0.5.0.json`: every skeleton, and each
-stream endpoint/runtime/adapter. Other files still match the independent release
-matrix. `ordinary-writer-skeletons.json` remains the historical v0.4.0 projection.
-The new projection is candidate source identity, not an independent behavioral
-oracle. Existing named reviewer tests and all fixtures migrate the trailing
-scratch triple; the counter golden is regenerated from the maintained schema.
+ModeStore is an independently specified circular storage example. Requests to
+inspectOffsets/readWindow contain big-endian u16 relative seeks; FFFF is
+reserved and partial words are refused. Inspection returns word count, cursor
+modulo 1280 and word XOR (three u16 fields). Reading returns only a circular
+window of the installed store; it has no proof prefix. Page preview reverses
+the staged page; authenticated description returns u32 length plus SHA-256.
+The harness computes cursors with host int arithmetic and checks store bytes
+against the installation formula, independently of applet state.
 
-`CallerWorkspaceLogic.java` is the trusted CAP-compatible business fixture with
-explicit 196/260 phase minima, precise input-last-consumer ordering and no borrowed
-buffer fields. `CallerWorkspaceHarness.java` supplies independent identity/span,
-boundary/refusal/retry, result lifetime and generated-field retention oracles.
-Its host-only subclass retains expected test references deliberately; generated
-classes and the CAP logic do not. `CallerWorkspaceApplet.java` and
-`CallerWorkspaceAPDUHarness.java` drive the actual simulator process/send path.
-See [the API and evidence limits](../../CALLER-WORKSPACE.md).
+`batch-store-authenticated-projection.json` records the five generated sources
+for each lifecycle choice of the independent BatchStore helper in
+`gen_java_authenticated_test.go`. It was captured from the current cleanup
+candidate, not a released generator. It pins source bytes only. The separate
+real-simulator positive/refusal/ledger-control tests and Classic converter
+checks qualify behavior and conversion; this file supplies neither proof.
 
-`Rev4ShapeApplet.java` and `Rev4ShapeHarness.java` drive the per-method stream
-modes on jCardSim: a chunked ECDSA signature over an incrementally parsed
-transcript, an authenticated issuer upload and two public streamed results
-produced into RAM. The applet reports every array store to its ledger.
-`Rev4ShapeCAPApplet.java` is the converter fixture for the same generated
-package. See `STREAM-MODES.md`.
+BatchStore's 29-byte simulator/CAP summary encodes a zero-padded 21-byte input
+prefix, u32 input byte count, u16 format 1, u8 state 1 and bool true (01).
+Its 11-byte position encodes u32 offset 0, u32 used input bytes, u16 flags 0
+and u8 state 1. Host ByteBuffer decoding checks the typed fields separately;
+the E3-at-input-offset-28 regression vector would have produced invalid E2
+under the former transform. Handler/harness bytes are not part of the
+generated-source projection receipt.

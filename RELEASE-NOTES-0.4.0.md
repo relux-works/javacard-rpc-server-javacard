@@ -101,7 +101,7 @@ IDL, INS values, field order, big-endian scalar encoding, Kotlin/Swift wire,
 stream lifecycle and stream output bytes remain unchanged. Stream handlers keep
 their raw-array API. The historical 216-row parity file remains frozen; only
 ordinary skeletons use the accepted writer projection. Historical release notes,
-Auth measurements and cleanup evidence retain their original source bounds.
+generic cleanup evidence retains its original source bounds.
 See [the full ownership contract](ORDINARY-OUTPUT-SPANS.md) and
 [historical cleanup measurements](PERSISTENT-WORKSPACE-COSTS.md).
 

@@ -18,10 +18,10 @@ public final short dispatchTo(byte ins, byte p1, byte p2,
         byte[] callerWorkspace, short callerWorkspaceOffset, short callerWorkspaceCapacity);
 
 // Fixed/packed/variable byte-sequence response callbacks:
-protected abstract short onGetAuthenticationIdentity(
+protected abstract short onGetRecord(
         byte[] output, short outputOffset, short outputCapacity,
         byte[] callerWorkspace, short callerWorkspaceOffset, short callerWorkspaceCapacity);
-protected abstract short onGetAuthAppletInfo(
+protected abstract short onGetStatus(
         byte[] output, short outputOffset, short outputCapacity,
         byte[] callerWorkspace, short callerWorkspaceOffset, short callerWorkspaceCapacity);
 
@@ -65,8 +65,8 @@ INS refuses with `6D00` after window validation. Replies are whole-only: no
 partial return, new reply array, retained output reference or constructor APDU
 binding is required.
 
-A 127-byte identity fits a 133-byte buffer at offset 6; a 13-byte applet info
-reply fits at offset 7. A 190/177-byte issuer reply requires a sufficiently large
+A 127-byte record fits a 133-byte buffer at offset 6; a 13-byte status
+reply fits at offset 7. A 190/177-byte batch reply requires a sufficiently large
 caller buffer AND a transport/platform capable of sending that whole reply.
 Neither fits a minimum 133-byte APDU array, even at offset zero. The dispatcher
 refuses insufficient capacity and does not turn an ordinary reply into a stream.
@@ -151,10 +151,11 @@ go run ./.scripts/check-mutants --only ordinary-borrowed-offset-use --out .temp/
 ```
 
 `make test-source` is an explicit inspected Go/source-only lane. It runs source
-allocation/ownership/wiring checks, the actual mixed Auth fixture and 216 parity
-rows through `Plugin.Generate`. The historical `parity-v0.4.5.json` remains intact:
-only skeleton hashes use the new `ordinary-writer-skeletons.json` projection;
-all other output files still compare to the historical independent release.
+allocation/ownership/wiring checks, the synthetic mixed SampleStore fixture and
+216 parity rows through `Plugin.Generate`. The three existing inputs retain
+their historical baselines; SampleStore adds an independently executed release
+baseline. API-bearing source hashes use `caller-workspace-v0.5.0.json`;
+other output files compare to the independent release.
 The new hashes freeze this authorized source change, not runtime correctness.
 
 `TestGeneratedOrdinaryOutputSpanBehavior` executes
@@ -199,37 +200,10 @@ and writer schema using the Oracle Classic kit, including borrowed request spans
 and all scalar/void encodings. The earlier JVM harness still proves the 133-byte
 caller-buffer controls and invalid-window refusals independently of JCRE capacity.
 
-## Historical v0.4.0 target measurements
+## Measurement scope
 
-The lease-bound producer recomputed the real simulator inventory and example
-cost controls for this writer skeleton. These are target fixtures, not migrated
-consumer measurements. The historical figures in PERSISTENT-WORKSPACE-COSTS.md
-remain historical; they do not bind the changed ordinary skeleton to prior Auth
-execution. The four Auth stream/transport source hashes remain unchanged; its
-production-namespace skeleton now has SHA256
-`42ad5fa6ca43e93eb39e9d28e60b302ffd6bd51080a0e2f773c02e25f0d56cd7`.
-
-| Example metric | Default cleanup | Whole reply cleanup |
-| --- | ---: | ---: |
-| Generated Java, five files | 46581 B | 47489 B |
-| Transient primitive payload | 328 B | 330 B |
-| Generated persistent array payload | 1816 B | 1816 B |
-| Reachable arrays / transient reference slots | 13 / 1 | 13 / 1 |
-| Untouched total workspace stores / calls per APDU | 1792 B / 11 | 0 B / 11 |
-| Provisioning total workspace stores / calls per APDU | 8960 B / 14–32 | 5376 B / 15–33 |
-| Issuance total workspace stores / calls per APDU | 6016 B / 14–32 | 2432 B / 15–33 |
-| Aborted partial request total stores / calls per APDU | 6272 B / 14–18 | 1792 B / 15–17 |
-| CAP components / Method.cap | 6817 B / 3950 B | 6957 B / 4042 B |
-
-The example uses a 1792 B workspace. Allocation of the frozen 2048 B Auth
-fixture separately reports 2375 B transient primitive payload and 108 B
-persistent primitive payload under transient storage, versus 328 B and 2156 B
-under persistent storage. Baseline and candidate transient inventories agree;
-this is not an assertion about physical object headers, reference widths,
-consumer-owned business arrays or NVM endurance. Narrowed allocation classification
-and logical-store observer plants fail at their intended assertions.
-
-The ordinary-only writer caller CAP has 3682 B uncompressed components and
-2048 B Method.cap. Classic conversion explicitly requires optional int support
-(`ints="true"`) as existing u32 fields and packing helpers use int arithmetic;
-actual card support and whole-reply transport capacity remain deployment inputs.
+Allocation, logical-store and CAP results must be measured from the selected
+neutral fixture and exact generated source. Consumer measurements are not a
+library baseline. The simulator does not establish physical RAM/NVM consumption
+or EEPROM endurance. Classic conversion requires optional integer support
+(`ints="true"`); actual card support remains a deployment input.
