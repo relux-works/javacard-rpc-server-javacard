@@ -29,9 +29,13 @@ A method without a mode and with a response stream is refused as before. Unknown
 ordinary method or under another cleanup selector are refused by name, and no
 file is returned. The facade repeats these checks before generation.
 
-The generated `STREAM_MODES` table gives each streamed method its mode and the
-skeleton passes it to `dispatch(..., methodMode, ...)`. The runtime rechecks the
-combination in `begin` and refuses an unknown mode, a streamed result of a
+The generated `STREAM_MODES` table gives each streamed method its mode. At
+installation the skeleton binds the handler and direction/limit/mode tables;
+the runtime owns immutable copies of those tables. Dispatch passes the method
+id and current APDU authority with separate request, response and caller-workspace
+spans, using 15 parameter words including the receiver. No per-command metadata
+or handler override is accepted. The runtime reads the installed row in `begin`
+and refuses an unknown mode, a streamed result of a
 method without a mode and a method without a request stream with `6A84` before
 any effect.
 

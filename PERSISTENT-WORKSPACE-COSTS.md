@@ -109,6 +109,14 @@ its writable prefix, then swaps bytes; those additional stores and method
 entries are counted. They are an example algorithm cost, not a requirement that
 every migrated handler incur that count.
 
+These footprint measurements predate compact stream dispatch. They retain the
+original comparison below. Current runtimes also own installation-time copies
+of method configuration: 11 primitive bytes per streamed method (one direction
+byte and five shorts), or 12 with a mode byte. Array object overhead is excluded.
+The current allocation fixtures report these copies separately from the generated
+static tables; use their output for the current source inventory and rerun CAP
+conversion for current component sizes.
+
 | Generated footprint | Released default | Whole reply | Written bytes (rejected) |
 | --- | ---: | ---: | ---: |
 | Transient primitive payload | 328 B | 330 B | 340 B |
