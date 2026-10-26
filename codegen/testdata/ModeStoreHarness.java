@@ -730,13 +730,24 @@ public class ModeStoreHarness {
 
     // ------------------------------------------------------- runtime refusals
 
-    // Direct runtime calls: begin refuses a streamed result for an authenticated
+    // Installation-configured runtimes: begin refuses a streamed result for an authenticated
     // method, an unknown mode and a missing request stream before any effect; a
     // valid chunked call is the accepted control.
-    static void runtimeRefusals(Object session) {
+    static ModeStoreStreamEndpoint configured(Object session, byte mode, boolean request, boolean response) throws Exception {
+        byte direction = (byte) ((request ? 2 : 0) | (response ? 1 : 0));
+        short width = response ? (short) -1 : (short) 6;
+        return new ModeStoreBoundedStreamRuntime((byte[]) field(session, "workspace"),
+                (byte[]) field(session, "digestScratch"), (short[]) field(session, "scalars"),
+                (Object[]) field(session, "handlerSlot"), ModeStoreApplet.installed.logic,
+                ModeStoreApplet.installed.logic, new byte[]{direction, direction},
+                new short[]{64, 32, 64, 32, width, 64, 32, 64, 32, width}, new byte[]{mode, mode});
+    }
+
+    static void runtimeRefusals(Object session) throws Exception {
         reset();
         ModeStoreStreamEndpoint endpoint = (ModeStoreStreamEndpoint) session;
         byte[] io = JCSystem.makeTransientByteArray((short) 255, JCSystem.CLEAR_ON_RESET);
+        installedModeCopy(session, io);
         Object[][] cases = {
             {"chunked method without request stream admitted", ModeStoreStreamEndpoint.MODE_CHUNKED, false, true},
             {"authenticated streamed result admitted", ModeStoreStreamEndpoint.MODE_AUTHENTICATED, true, true},
@@ -746,11 +757,11 @@ public class ModeStoreHarness {
         for (Object[] c : cases) {
             String label = (String) c[0];
             boolean request = (Boolean) c[2], response = (Boolean) c[3];
+            endpoint = configured(session, (Byte) c[1], request, response);
             NvmLedger.reset();
             try {
-                endpoint.dispatch((byte) 2, ModeStoreStreamEndpoint.OP_WRITE_OR_INVOKE, (Byte) c[1],
-                        request, (short) 64, (short) 32, response, (short) 64, (short) 32, response ? (short) -1 : (short) 6,
-                        ModeStoreApplet.installed.logic, (byte) 0, (byte) 1, io, (short) 0, (short) 4, io, (short) 0, (short) 255,
+                endpoint.dispatch((byte) 2, ModeStoreStreamEndpoint.OP_WRITE_OR_INVOKE,
+                        (byte) 0, (byte) 1, io, (short) 0, (short) 4, io, (short) 0, (short) 255,
                         io, (short) 0, (short) 255, true);
                 throw new AssertionError(label);
             } catch (ModeStoreStreamEndpoint.StreamStatusWordException e) {
@@ -758,18 +769,53 @@ public class ModeStoreHarness {
             }
             if (NvmLedger.persistent != 0) throw new AssertionError(label + ": wrote persistent");
         }
+        endpoint = configured(session, ModeStoreStreamEndpoint.MODE_CHUNKED, true, false);
         NvmLedger.reset();
         Arrays.fill(io, (byte) 0);
         io[1] = 1; // One relative seek of 1, then 0.
         try {
-            endpoint.dispatch((byte) 2, ModeStoreStreamEndpoint.OP_WRITE_OR_INVOKE, ModeStoreStreamEndpoint.MODE_CHUNKED,
-                    true, (short) 64, (short) 32, false, (short) 0, (short) 0, (short) 6,
-                    ModeStoreApplet.installed.logic, (byte) 0, (byte) 1, io, (short) 0, (short) 4, io, (short) 0, (short) 255,
+            endpoint.dispatch((byte) 2, ModeStoreStreamEndpoint.OP_WRITE_OR_INVOKE,
+                    (byte) 0, (byte) 1, io, (short) 0, (short) 4, io, (short) 0, (short) 255,
                     io, (short) 0, (short) 255, false);
         } catch (ModeStoreStreamEndpoint.StreamStatusWordException e) {
             throw new AssertionError("chunked runtime control refused: " + Integer.toHexString(e.getStatusWord() & 65535));
         }
         if (NvmLedger.persistent != 0) throw new AssertionError("chunked runtime control wrote persistent");
+        endpoint.abort(ModeStoreStreamEndpoint.ABORT_EXPLICIT);
+    }
+
+    // A caller cannot mutate installed authentication or request bounds through
+    // the original configuration arrays. The refusal and accepted write have
+    // separate ledger assertions; installation stores are excluded explicitly.
+    static void installedModeCopy(Object session, byte[] io) throws Exception {
+        byte[] directions = {2};
+        short[] limits = {64, 32, 0, 0, 6};
+        byte[] modes = {ModeStoreStreamEndpoint.MODE_AUTHENTICATED};
+        ModeStoreStreamEndpoint endpoint = new ModeStoreBoundedStreamRuntime(
+                (byte[]) field(session, "workspace"), (byte[]) field(session, "digestScratch"),
+                (short[]) field(session, "scalars"), (Object[]) field(session, "handlerSlot"),
+                ModeStoreApplet.installed.logic, ModeStoreApplet.installed.logic, directions, limits, modes);
+        directions[0] = 0;
+        Arrays.fill(limits, (short) 0);
+        modes[0] = ModeStoreStreamEndpoint.MODE_CHUNKED;
+        short[] before = ((short[]) field(session, "scalars")).clone();
+        byte[] bulk = ((byte[]) field(session, "workspace")).clone();
+        NvmLedger.reset();
+        try {
+            endpoint.dispatch((byte) 1, ModeStoreStreamEndpoint.OP_WRITE_OR_INVOKE,
+                    (byte) 0, (byte) 1, io, (short) 0, (short) 4, io, (short) 0, (short) 255,
+                    io, (short) 0, (short) 255, false);
+            throw new AssertionError("configuration mutation bypassed authentication");
+        } catch (ModeStoreStreamEndpoint.StreamStatusWordException failure) {
+            if (failure.getStatusWord() != (short) 0x6982) throw new AssertionError("configuration mutation changed refusal");
+        }
+        if (NvmLedger.persistent != 0 || !Arrays.equals(before, (short[]) field(session, "scalars")) ||
+                !Arrays.equals(bulk, (byte[]) field(session, "workspace"))) throw new AssertionError("configuration refusal changed session");
+        NvmLedger.reset();
+        endpoint.dispatch((byte) 1, ModeStoreStreamEndpoint.OP_WRITE_OR_INVOKE,
+                (byte) 0, (byte) 1, io, (short) 0, (short) 4, io, (short) 0, (short) 255,
+                io, (short) 0, (short) 255, true);
+        if (NvmLedger.persistent != 4) throw new AssertionError("configuration mutation changed valid upload");
         endpoint.abort(ModeStoreStreamEndpoint.ABORT_EXPLICIT);
     }
 

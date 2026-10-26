@@ -228,9 +228,9 @@ func TestStreamModesKeepAuthenticatedOutput(t *testing.T) {
 func streamModesSourceContract(r *JavaGenerationResult) error {
 	runtime, skeleton, endpoint := string(r.StreamRuntimeSource), string(r.SkeletonSource), string(r.StreamEndpointSource)
 	for _, check := range []struct{ label, source, want string }{
-		{"mode parameter", endpoint, "            byte operation,\n            byte methodMode,\n"},
+		{"compact endpoint", endpoint, "            byte operation,\n            byte p1,\n"},
 		{"mode table", skeleton, "    private static final byte[] STREAM_MODES = {\n        (byte) 1, (byte) 2, (byte) 0, (byte) 2 };\n"},
-		{"mode forwarding", skeleton, "operation, STREAM_MODES[row],"},
+		{"installed mode binding", skeleton, "this, this, STREAM_DIRECTIONS, STREAM_LIMITS, STREAM_MODES);"},
 		{"gate", runtime, "        if (!authenticated && (methodMode == MODE_AUTHENTICATED ||\n                (scalars[IDX_STATE] == STATE_WRITING &&\n                        scalars[IDX_METHOD_MODE] == MODE_AUTHENTICATED))) {\n            rejectWithoutClearing(SW_SECURITY_STATUS_NOT_SATISFIED);"},
 		{"chunk record transfer", runtime, "            requireRamSpan(callerWorkspace);\n            sha256.updateDigest(request, requestOffset, requestLength);"},
 		{"staging", runtime, "copy(request, requestOffset, workspace, scalars[IDX_INPUT_LENGTH], requestLength);"},

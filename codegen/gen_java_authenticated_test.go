@@ -649,14 +649,22 @@ public class BatchStoreHarness {
   }
   expect(0x6700,0x40,0,14,a,0,"oversized declaration wrote persistent");
  }
- // Direct runtime call: a streamed result is refused in begin before any effect.
+ // Installation-configured runtime: a streamed result is refused in begin
+ // before any command effect; the nearby short-result control remains usable.
+ static BatchStoreStreamEndpoint configured(Object session,boolean response)throws Exception{
+  return new BatchStoreBoundedStreamRuntime((byte[])field(session,"workspace"),(byte[])field(session,"digestScratch"),
+   (short[])field(session,"scalars"),(Object[])field(session,"handlerSlot"),BatchStoreApplet.installed.logic,
+   BatchStoreApplet.installed.logic,new byte[]{(byte)(response?3:2)},
+   new short[]{64,32,(short)(response?64:0),(short)(response?32:0),(short)(response?-1:29)});
+ }
  static void direct(Object session)throws Exception{
-  BatchStoreStreamEndpoint endpoint=(BatchStoreStreamEndpoint)session;byte[] io=new byte[255];
+  BatchStoreStreamEndpoint endpoint=configured(session,true);byte[] io=new byte[255];
   NvmLedger.reset();
-  try{endpoint.dispatch((byte)1,BatchStoreStreamEndpoint.OP_WRITE_OR_INVOKE,true,(short)64,(short)32,true,(short)64,(short)32,(short)-1,BatchStoreApplet.installed.logic,(byte)0,(byte)1,io,(short)0,(short)4,io,(short)0,(short)255,io,(short)0,(short)255,true);throw new AssertionError("streamed result admitted");}
+  try{endpoint.dispatch((byte)1,BatchStoreStreamEndpoint.OP_WRITE_OR_INVOKE,(byte)0,(byte)1,io,(short)0,(short)4,io,(short)0,(short)255,io,(short)0,(short)255,true);throw new AssertionError("streamed result admitted");}
   catch(BatchStoreStreamEndpoint.StreamStatusWordException e){if(e.getStatusWord()!=(short)0x6A84)throw new AssertionError("streamed result admitted: "+Integer.toHexString(e.getStatusWord()&65535));}
   if(NvmLedger.persistent!=0)throw new AssertionError("streamed result refusal wrote persistent");
-  try{endpoint.dispatch((byte)1,BatchStoreStreamEndpoint.OP_WRITE_OR_INVOKE,true,(short)64,(short)32,false,(short)0,(short)0,(short)29,BatchStoreApplet.installed.logic,(byte)0,(byte)1,io,(short)0,(short)4,io,(short)0,(short)255,io,(short)0,(short)255,true);}
+  endpoint=configured(session,false);NvmLedger.reset();
+  try{endpoint.dispatch((byte)1,BatchStoreStreamEndpoint.OP_WRITE_OR_INVOKE,(byte)0,(byte)1,io,(short)0,(short)4,io,(short)0,(short)255,io,(short)0,(short)255,true);}
   catch(BatchStoreStreamEndpoint.StreamStatusWordException e){throw new AssertionError("short result control refused: "+Integer.toHexString(e.getStatusWord()&65535));}
   if(NvmLedger.persistent!=4)throw new AssertionError("short result control stored "+NvmLedger.persistent);
   endpoint.abort(BatchStoreStreamEndpoint.ABORT_EXPLICIT);

@@ -110,6 +110,7 @@ continue using fields such as output, produced, result and payloadOffset.
 | Go | go build ./...; go vet ./...: compile and lint backend | Go cache; console |
 | Gradle wrapper | ./gradlew build --no-daemon --max-workers=2: build root runtime | build/libs/ |
 | Make | make test, make build, make lint: the narrow combined entry points | Same outputs as above |
+| Go source checks | make test-source: generation, source contracts and stream parameter-word limits; starts no JVM | Console; capture logs under .temp/ |
 | Ant / ant-javacard / Java Card SDK | JCRPC_ANT_JAVACARD_JAR=/path/ant-javacard.jar JCRPC_JCKIT_DIR=/path/jc305u4_kit JAVA_HOME=/path/jdk11 PATH=/path/jdk11/bin:$PATH make test-cap | Ordinary writer, default and explicit whole-reply cleanup verified CAP inventories in test temporary directories |
 | Relux jCardSim / JDK 17 | JCRPC_JCARDSIM_JAR=/path/jcardsim-3.0.5.9-relux.1.jar make test-simulator | Real simulator lifecycle, allocation, cost and intended-violation controls in test temporary directories |
 | Go mutation runner | JCRPC_JCKIT_DIR=/path/jc305u4_kit JCRPC_JCARDSIM_JAR=/path/jcardsim-3.0.5.9-relux.1.jar go run ./.scripts/check-mutants --out .temp/mutants-01 | Disposable candidate fixtures, per-mutant logs and receipts.json |
@@ -126,6 +127,17 @@ runtime is tested through Simulator.transmitCommand and AppletBase.process.
 Unset native toolchain variables explicitly skip optional native tests; required
 Make lanes refuse missing configuration. A default Go pass alone does not claim
 simulator or CAP coverage. Set TMPDIR under .temp/ when retaining native scratch.
+
+The generated stream runtime binds its handler and method configuration at
+installation. It owns copies of the direction/limit tables and, for mixed modes,
+the mode table. Command dispatch supplies method, operation, P1/P2 and separate
+request, response and caller-workspace spans; authenticated variants additionally
+receive the authority of the current APDU. Including the receiver, dispatch uses
+14 Java Card parameter words, or 15 with authentication. No flattened legacy
+dispatch overload is generated. Mutable session state remains in the injected
+transient arrays; immutable configuration is never written by command paths.
+Source word counts do not establish successful Classic conversion; use the
+ordinary JVM, simulator and CAP lanes for runtime and converter evidence.
 
 The committed testdata matrix pins the JavaCard projection of all core v0.4.5
 fixtures, namespaces and options. See codegen/testdata/README.md for provenance,

@@ -49,23 +49,14 @@ public interface {{.StreamEndpointName}} {
      * persistent effect; persistent workspace is reachable only when it is true.
 {{- end}}
 {{- if .StreamMixed}}
-     * methodMode is the method's generated MODE_* value. Authentication is
+     * The installed method mode is the generated MODE_* value. Authentication is
      * required only for MODE_AUTHENTICATED, and an unauthenticated APDU never
      * changes a live authenticated upload.
 {{- end}}
      */
     short dispatch(
             byte methodId,
-            byte operation,{{if .StreamMixed}}
-            byte methodMode,{{end}}
-            boolean hasRequestStream,
-            short requestMaxLength,
-            short requestChunkSize,
-            boolean hasResponseStream,
-            short responseMaxLength,
-            short responseChunkSize,
-            short exactShortResponseLength,
-            Handler handler,
+            byte operation,
             byte p1,
             byte p2,
             byte[] requestBuffer,
@@ -321,6 +312,11 @@ public final class {{.StreamRuntimeName}} implements {{.StreamEndpointName}} {
     private final short[] scalars;
     private final Object[] handlerSlot;
     private final Sha256 sha256;
+    private final Handler handler;
+    private final byte[] methodDirections;
+    private final short[] methodLimits;
+{{if .StreamMixed}}    private final byte[] methodModes;
+{{end}}    private static final short LIMIT_COLUMNS = (short) 5;
     private final StreamStatusWordException failure;
 {{if and .StreamWorkspacePersistent (not .StreamAuthenticated)}}    private final byte[] resetMarker;
 {{end}}
@@ -329,7 +325,11 @@ public final class {{.StreamRuntimeName}} implements {{.StreamEndpointName}} {
             byte[] digestScratch,
             short[] scalars,
             Object[] handlerSlot,
-            Sha256 sha256) {
+            Sha256 sha256,
+            Handler handler,
+            byte[] configuredDirections,
+            short[] configuredLimits{{if .StreamMixed}},
+            byte[] configuredModes{{end}}) {
         this.workspace = workspace;
 {{if and .StreamWorkspacePersistent (not .StreamAuthenticated)}}        this.resetMarker = javacard.framework.JCSystem.makeTransientByteArray(
                 (short) 1, javacard.framework.JCSystem.{{if .StreamCleanupTracked}}CLEAR_ON_RESET{{else}}{{.StreamTransientEvent}}{{end}});
@@ -343,10 +343,30 @@ public final class {{.StreamRuntimeName}} implements {{.StreamEndpointName}} {
                 digestScratch == null || digestScratch.length < DIGEST_LENGTH ||
                 scalars == null || scalars.length < SCALAR_COUNT ||
                 handlerSlot == null || handlerSlot.length < HANDLER_SLOT_COUNT ||
-                sha256 == null) {
+                sha256 == null || handler == null || configuredDirections == null ||
+                configuredDirections.length == 0 || configuredDirections.length > 127 ||
+                configuredLimits == null || configuredLimits.length % LIMIT_COLUMNS != 0 ||
+                configuredLimits.length / LIMIT_COLUMNS != configuredDirections.length{{if .StreamMixed}} ||
+                configuredModes == null || configuredModes.length != configuredDirections.length{{end}}) {
             failure.setStatusWord(SW_NO_MEMORY);
             throw failure;
         }
+        // Installation owns these immutable copies. Caller mutations cannot
+        // change method authority or limits, and command paths never write them.
+        this.handler = handler;
+        this.methodDirections = new byte[(short) configuredDirections.length];
+        this.methodLimits = new short[(short) configuredLimits.length];
+        for (short i = 0; i < (short) configuredDirections.length; i++) {
+            methodDirections[i] = configuredDirections[i];
+        }
+        for (short i = 0; i < (short) configuredLimits.length; i++) {
+            methodLimits[i] = configuredLimits[i];
+        }
+{{if .StreamMixed}}        this.methodModes = new byte[(short) configuredModes.length];
+        for (short i = 0; i < (short) configuredModes.length; i++) {
+            methodModes[i] = configuredModes[i];
+        }
+{{end}}
         clearAll();
 {{if and .StreamWorkspacePersistent (not .StreamAuthenticated)}}        resetMarker[0] = (byte) 1;
 {{end}}    }
@@ -354,16 +374,7 @@ public final class {{.StreamRuntimeName}} implements {{.StreamEndpointName}} {
     @Override
     public short dispatch(
             byte methodId,
-            byte operation,{{if .StreamMixed}}
-            byte methodMode,{{end}}
-            boolean requestEnabled,
-            short requestLimit,
-            short requestChunk,
-            boolean responseEnabled,
-            short responseLimit,
-            short responseChunk,
-            short shortResponseLength,
-            Handler handler,
+            byte operation,
             byte p1,
             byte p2,
             byte[] requestBuffer,
@@ -377,6 +388,9 @@ public final class {{.StreamRuntimeName}} implements {{.StreamEndpointName}} {
             short callerWorkspaceCapacity{{if .StreamAuthenticated}},
             boolean authenticated{{end}}) {
 {{- if .StreamMixed}}
+        short methodRow = (short) (methodId - 1);
+        byte methodMode = methodRow >= 0 && methodRow < (short) methodModes.length
+                ? methodModes[methodRow] : (byte) -1;
         // An authenticated method stages nothing before authentication, and an
         // unauthenticated APDU of any method cannot cancel or join a live
         // authenticated upload: refuse before any session or persistent effect.
@@ -398,6 +412,9 @@ public final class {{.StreamRuntimeName}} implements {{.StreamEndpointName}} {
                 callerWorkspaceCapacity > callerWorkspace.length - callerWorkspaceOffset) {
             {{if .StreamAuthenticated}}fail{{else}}rejectWithoutClearing{{end}}(SW_WRONG_LENGTH);
         }
+        if (methodId <= 0 || methodId > (short) methodDirections.length) {
+            {{if .StreamAuthenticated}}fail{{else}}rejectWithoutClearing{{end}}(SW_WRONG_STATE);
+        }
         try {
 {{if and .StreamWorkspacePersistent (not .StreamAuthenticated)}}            // Transient state is already empty after reset; clean retained NVM
             // before any command can expose or reuse it, including stale reads.
@@ -409,7 +426,6 @@ public final class {{.StreamRuntimeName}} implements {{.StreamEndpointName}} {
             }
 {{end}}            validateRange(requestBuffer, requestOffset, requestLength);
             validateRange(responseBuffer, responseOffset, responseCapacity);
-
             if (operation == OP_ABORT) {
                 requireEmptyCommand(p1, p2, requestLength);
                 abort(ABORT_EXPLICIT);
@@ -422,9 +438,7 @@ public final class {{.StreamRuntimeName}} implements {{.StreamEndpointName}} {
                     clearAll();
                 }
                 if (scalars[IDX_STATE] == STATE_EMPTY) {
-                    begin(methodId, {{if .StreamMixed}}methodMode, {{end}}requestEnabled, requestLimit, requestChunk,
-                            responseEnabled, responseLimit, responseChunk,
-                            shortResponseLength, handler);
+                    begin(methodId);
                 } else if (scalars[IDX_ACTIVE_METHOD] != methodId) {
 {{- if .StreamAuthenticated}}
                     // A refused authenticated APDU invalidates the live handle.
@@ -490,17 +504,19 @@ public final class {{.StreamRuntimeName}} implements {{.StreamEndpointName}} {
         return scalars[IDX_HAS_RESPONSE_STREAM] != 0;
     }
 
-    private void begin(
-            byte methodId,{{if .StreamMixed}}
-            byte methodMode,{{end}}
-            boolean requestEnabled,
-            short requestLimit,
-            short requestChunk,
-            boolean responseEnabled,
-            short responseLimit,
-            short responseChunk,
-            short shortResponseLength,
-            Handler handler) {
+    private void begin(byte methodId) {
+        short row = (short) (methodId - 1);
+        short limits = (short) (row * LIMIT_COLUMNS);
+        byte directions = methodDirections[row];
+        boolean requestEnabled = (directions & (byte) 2) != 0;
+        boolean responseEnabled = (directions & (byte) 1) != 0;
+        short requestLimit = methodLimits[limits];
+        short requestChunk = methodLimits[(short) (limits + 1)];
+        short responseLimit = methodLimits[(short) (limits + 2)];
+        short responseChunk = methodLimits[(short) (limits + 3)];
+        short shortResponseLength = methodLimits[(short) (limits + 4)];
+{{if .StreamMixed}}        byte methodMode = methodModes[row];
+{{end}}
         short required = requestEnabled ? requestLimit : (short) 0;
 {{- if .StreamMixed}}
         // A streamed result is produced into RAM on demand, never staged.
@@ -520,7 +536,7 @@ public final class {{.StreamRuntimeName}} implements {{.StreamEndpointName}} {
             required = (short) 0;
         }
 {{- end}}
-        if ((!requestEnabled && !responseEnabled) || handler == null ||
+        if ((!requestEnabled && !responseEnabled) ||
                 (requestEnabled && (requestLimit <= 0 || requestChunk <= 0)) ||
                 (responseEnabled && (responseLimit <= 0 || responseChunk <= 0)) ||
                 (responseEnabled && shortResponseLength != (short) -1) ||
@@ -1356,8 +1372,13 @@ func buildJavaStreamConstructor(data *javaTemplateData) string {
                         STREAM_SCALAR_COUNT, JCSystem.%[5]s),
                 JCSystem.makeTransientObjectArray(
                         STREAM_HANDLER_SLOT_COUNT, JCSystem.%[5]s),
-                this);
-    }`, data.ClassName, data.TransportInterfaceName, data.StreamEndpointName, data.StreamRuntimeName, data.StreamTransientEvent, data.StreamDigestExternalAccess)
+                this, this, STREAM_DIRECTIONS, STREAM_LIMITS%[7]s);
+    }`, data.ClassName, data.TransportInterfaceName, data.StreamEndpointName, data.StreamRuntimeName, data.StreamTransientEvent, data.StreamDigestExternalAccess, func() string {
+		if data.StreamMixed {
+			return ", STREAM_MODES"
+		}
+		return ""
+	}())
 	if data.StreamWorkspacePersistent {
 		source = strings.Replace(source, "JCSystem.makeTransientByteArray(\n                        STREAM_WORKSPACE_LENGTH, JCSystem."+data.StreamTransientEvent+")", "new byte[STREAM_WORKSPACE_LENGTH]", 1)
 		start := strings.Index(source, "        // Every mutable word")
@@ -1460,7 +1481,6 @@ func buildJavaStreamDispatchSupport(data *javaTemplateData, methods []javaMethod
 			row.exactShortResponse, terminator)
 	}
 	b.WriteString(`
-    private static final short STREAM_LIMIT_COLUMNS = (short) 5;
     private static final short STREAM_OPERATION_COUNT = (short) 6;
 
     /**
@@ -1488,16 +1508,9 @@ func buildJavaStreamDispatchSupport(data *javaTemplateData, methods []javaMethod
             ISOException.throwIt(SW_INS_NOT_SUPPORTED);
             return (short) 0;
         }
-        short limits = (short) (row * STREAM_LIMIT_COLUMNS);
-        byte directions = STREAM_DIRECTIONS[row];
         byte operation = (byte) ((short) (ins & 0xFF) - (short) (STREAM_INS_BASE[row] & 0xFF));
         try {
             return streamSession.dispatch((byte) (row + (short) 1), operation,
-                    (directions & (byte) 2) != (byte) 0,
-                    STREAM_LIMITS[limits], STREAM_LIMITS[(short) (limits + 1)],
-                    (directions & (byte) 1) != (byte) 0,
-                    STREAM_LIMITS[(short) (limits + 2)], STREAM_LIMITS[(short) (limits + 3)],
-                    STREAM_LIMITS[(short) (limits + 4)], this,
                     p1, p2, requestBuffer, requestOffset, requestLength,
                     responseBuffer, responseOffset, responseCapacity,
                     callerWorkspace, callerWorkspaceOffset, callerWorkspaceCapacity);

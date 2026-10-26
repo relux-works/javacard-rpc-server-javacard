@@ -101,7 +101,7 @@ func streamMethodsInOrder(methods []javaMethodRender) []javaMethodRender {
 }
 
 // mixedJavaStreamDispatchSupport adds the per-method mode table to the
-// authenticated dispatch support and passes the row's mode to the runtime.
+// authenticated dispatch support for installation-time runtime configuration.
 func mixedJavaStreamDispatchSupport(source string, methods []javaMethodRender) string {
 	streamed := streamMethodsInOrder(methods)
 	var table strings.Builder
@@ -114,10 +114,8 @@ func mixedJavaStreamDispatchSupport(source string, methods []javaMethodRender) s
 	})
 	table.WriteString("\n")
 	return strings.NewReplacer(
-		"    private static final short STREAM_LIMIT_COLUMNS = (short) 5;\n",
-		table.String()+"    private static final short STREAM_LIMIT_COLUMNS = (short) 5;\n",
-		"            return streamSession.dispatch((byte) (row + (short) 1), operation,\n",
-		"            return streamSession.dispatch((byte) (row + (short) 1), operation, STREAM_MODES[row],\n",
+		"    private static final short STREAM_OPERATION_COUNT = (short) 6;\n",
+		table.String()+"    private static final short STREAM_OPERATION_COUNT = (short) 6;\n",
 	).Replace(source)
 }
 

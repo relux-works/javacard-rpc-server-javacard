@@ -24,6 +24,9 @@ The latter file's version-shaped name is not historical provenance.
 `sample-store-default-projection.json` and
 `sample-store-whole-projection.json` are also current-source receipts.
 None of these projection receipts may replace retained historical hashes.
+The current receipts include compact stream dispatch and installation-owned
+configuration copies. Their refresh records generated source bytes only; it
+does not certify conversion, runtime behavior or absence of persistent writes.
 
 ModeStore is an independently specified circular storage example. Requests to
 inspectOffsets/readWindow contain big-endian u16 relative seeks; FFFF is
@@ -48,3 +51,10 @@ and u8 state 1. Host ByteBuffer decoding checks the typed fields separately;
 the E3-at-input-offset-28 regression vector would have produced invalid E2
 under the former transform. Handler/harness bytes are not part of the
 generated-source projection receipt.
+
+StreamRuntimeHarness keeps lifecycle/interleaving coverage over shared transient
+arrays and additionally checks configuration-input mutation and unknown method
+refusal with a usable owner continuation. BatchStore and ModeStore install
+deliberately invalid configurations for their direct-runtime refusal cases;
+configuration is no longer accepted as per-command metadata. Their logical NVM
+ledger is reset after installation, so command effects remain separately measured.
