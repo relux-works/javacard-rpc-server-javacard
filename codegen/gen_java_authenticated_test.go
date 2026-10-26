@@ -734,7 +734,10 @@ public class BatchStoreHarness {
  }
  static byte[] chunk(int n,int seed){byte[] r=new byte[n];for(int i=0;i<n;i++)r[i]=(byte)(seed*31+i*7);return r;}
  static byte[] cat(byte[] x,byte[] y){byte[] r=Arrays.copyOf(x,x.length+y.length);System.arraycopy(y,0,r,x.length,y.length);return r;}
- static byte[] send(int ins,int p1,int p2,byte[] data){byte[] a=new byte[data.length==0?4:data.length+5];a[0]=(byte)0xC0;a[1]=(byte)ins;a[2]=(byte)p1;a[3]=(byte)p2;if(data.length>0){a[4]=(byte)data.length;System.arraycopy(data,0,a,5,data.length);}byte[] r=simulator.transmitCommand(a);int n=r.length;short sw=(short)(((r[n-2]&255)<<8)|(r[n-1]&255));if(sw!=(short)0x9000)ISOException.throwIt(sw);return Arrays.copyOf(r,n-2);}
+ // The fixture selects the basic channel only. 80 is the generated C0 class's
+ // first-coding form; C0 itself selects unopened channel 4 in a channel-aware
+ // simulator and is refused before the applet's authentication gate runs.
+ static byte[] send(int ins,int p1,int p2,byte[] data){byte[] a=new byte[data.length==0?4:data.length+5];a[0]=(byte)0x80;a[1]=(byte)ins;a[2]=(byte)p1;a[3]=(byte)p2;if(data.length>0){a[4]=(byte)data.length;System.arraycopy(data,0,a,5,data.length);}byte[] r=simulator.transmitCommand(a);int n=r.length;short sw=(short)(((r[n-2]&255)<<8)|(r[n-1]&255));if(sw!=(short)0x9000)ISOException.throwIt(sw);return Arrays.copyOf(r,n-2);}
  static byte[] close(byte[] data){try{byte[] r=new byte[34];r[0]=(byte)(data.length>>8);r[1]=(byte)data.length;System.arraycopy(MessageDigest.getInstance("SHA-256").digest(data),0,r,2,32);return r;}catch(Exception e){throw new RuntimeException(e);}}
  static Object field(Object x,String n)throws Exception{Class<?> c=x.getClass();while(c!=null){try{Field f=c.getDeclaredField(n);f.setAccessible(true);return f.get(x);}catch(NoSuchFieldException e){c=c.getSuperclass();}}throw new NoSuchFieldException(n);}
  public static class EmptyApplet extends Applet{public static void install(byte[] b,short o,byte l){new EmptyApplet().register();}public void process(APDU a){}}

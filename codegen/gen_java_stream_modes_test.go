@@ -559,8 +559,10 @@ func TestStreamModesAllocationPayload(t *testing.T) {
 	modesT, modesP, modesW, modesOut := measure(sampleWithModes(t))
 	streamed += 2
 	// Independent input limits: two upload methods need 1024 B; adding page
-	// exchange requires 1536 B, besides the two extra stream table rows.
-	wantP := baseP + 512 + 2 + 2 + 2*5*2 + streamed
+	// exchange requires 1536 B. The two extra INS bytes occur once. Directions
+	// (one byte/row), limits (five shorts/row) and mixed modes (one byte/method)
+	// exist in both generated tables and immutable runtime-owned copies.
+	wantP := baseP + 512 + 2 + 2*(2+2*5*2+streamed)
 	t.Logf("authenticated-invalidate upload-only storage: transient=%d B persistent=%d B workspace=%d B\n%s", baseT, baseP, baseW, baseOut)
 	t.Logf("per-method modes full storage: transient=%d B persistent=%d B workspace=%d B (%d streamed methods)\n%s", modesT, modesP, modesW, streamed, modesOut)
 	if modesT != baseT+2 || modesP != wantP || modesW != 1536 || baseW != 1024 {
