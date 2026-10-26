@@ -117,6 +117,11 @@ The current allocation fixtures report these copies separately from the generate
 static tables; use their output for the current source inventory and rerun CAP
 conversion for current component sizes.
 
+For the four-method sample-store fixture, the independent current inventory adds
+44 persistent payload bytes in two arrays (`byte[4]` and `short[20]`) for these
+runtime-owned copies under either workspace policy. The historical baseline
+assertion keeps its original inventory and does not include these later copies.
+
 | Generated footprint | Released default | Whole reply | Written bytes (rejected) |
 | --- | ---: | ---: | ---: |
 | Transient primitive payload | 328 B | 330 B | 340 B |

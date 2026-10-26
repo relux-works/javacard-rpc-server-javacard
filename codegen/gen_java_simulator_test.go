@@ -175,10 +175,18 @@ func TestSampleStoreGeneratedAllocationPayload(t *testing.T) {
 				}
 			}
 			// Independent inventory: scratch 32 + scalars 17*2 + three status
-			// words 3*2 + adapter 255 = 327; four stream rows need 4+4+20*2 = 48.
+			// words 3*2 + adapter 255 = 327; four static stream rows need
+			// 4+4+20*2 = 48. Keep the historical baseline inventory unchanged.
 			transient, persistent, arrays := workspace+327, 48, 12
 			if policy == "persistent" {
 				transient, persistent, arrays = 328, 48+workspace, 13
+			}
+			if policy != "baseline" {
+				// Current runtimes own installation copies of four directions
+				// and five short limits per row: byte[4] + short[20] = 44 B,
+				// two persistent arrays, independent of workspace placement.
+				persistent += 4 + 20*2
+				arrays += 2
 			}
 			want := fmt.Sprintf("TOTAL transient primitive payload=%d B; transient reference slots=1; persistent primitive payload=%d B; persistent reference slots=0; arrays=%d", transient, persistent, arrays)
 			if !strings.Contains(output, want) {
