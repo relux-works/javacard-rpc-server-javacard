@@ -180,6 +180,13 @@ public final class ModeStoreApplet extends Applet {
             return 36;
         }
 
+        // Same page-description handler, reached through a public-invalidate
+        // stream so the runtime must retain, then invalidate, its short receipt.
+        protected short onDescribePublicPageStream(byte[] input, short io, short il, byte[] output, short oo, short oc,
+                byte[] w, short wo, short wc) {
+            return onDescribePageStream(input, io, il, output, oo, oc, w, wo, wc);
+        }
+
         protected short onExchangePagePrepare(byte[] input, short io, short il, byte[] w, short wo, short wc) {
             prepareCalls++;
             produceCalls = 0;

@@ -21,7 +21,7 @@ public class ModeStoreHarness {
     static final byte[] EMPTY = new byte[0];
 
     // INS families.
-    static final int PREVIEW = 0x13, INSPECT = 0x23, PUT = 0x33, WINDOW = 0x43;
+    static final int PREVIEW = 0x13, INSPECT = 0x23, PUT = 0x33, WINDOW = 0x43, PUBLIC_RECEIPT = 0x53;
     static final int WRITE = 0, CLOSE = 1, INFO = 2, READ = 3, CLOSE_READ = 4, ABORT = 5;
 
     public static void main(String[] args) throws Exception {
@@ -554,6 +554,19 @@ public class ModeStoreHarness {
         expect(0x9000, 0x02, 0, 0, EMPTY, 0, "pending output invalidation wrote persistent");
         expect(0x6985, PREVIEW + READ, 0, 2, EMPTY, 0, "public invalidation retained output");
         expect(0x6985, PREVIEW + CLOSE, 0, 0, close(input), 0, "public invalidation revived CLOSE receipt");
+
+        // Establish an actual STATE_SHORT_CLOSED public receipt. Its immediate
+        // retry after invalidation must be the first subsequent stream APDU:
+        // an earlier refusal would itself clear retained state and hide a bug.
+        expect(0x9000, PUBLIC_RECEIPT, 0, 2, part(input, 0), 192, "public receipt first chunk");
+        expect(0x9000, PUBLIC_RECEIPT, 1, 2, part(input, 1), 160, "public receipt last chunk");
+        byte[] publicReceipt = expect(0x9000, PUBLIC_RECEIPT + CLOSE, 0, 0, close(input), 36, "public receipt creation");
+        byte[] retry = expect(0x9000, PUBLIC_RECEIPT + CLOSE, 0, 0, close(input), 0, "public receipt replay control");
+        if (publicReceipt.length != 36 || !Arrays.equals(publicReceipt, retry)
+                || !Arrays.equals(Arrays.copyOfRange(publicReceipt, 4, 36), digest(input)))
+            throw new AssertionError("public receipt does not describe the uploaded page");
+        expect(0x9000, 0x02, 0, 0, EMPTY, 0, "public receipt invalidation wrote persistent");
+        expect(0x6985, PUBLIC_RECEIPT + CLOSE, 0, 0, close(input), 0, "public invalidation retained short receipt");
 
         byte[] seeks = offsets(194);
         expect(0x9000, INSPECT, 0, 2, part(seeks, 0), 0, "chunked invalidation control");

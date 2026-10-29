@@ -35,6 +35,9 @@ func modeStoreSchema() *Schema {
 				{Name: "length", Type: FieldTypeU32}, {Name: "digest", Type: FieldTypeBytesFixed, FixedLength: 32}}}},
 			"readWindow": {Name: "readWindow", INS: 0x43, StreamMode: StreamModeChunked,
 				Request: stream(352), Response: stream(1280)},
+			"describePublicPage": {Name: "describePublicPage", INS: 0x53, StreamMode: StreamModePublicInvalidate,
+				Request: stream(1024), Response: &Message{Fields: []Field{
+					{Name: "length", Type: FieldTypeU32}, {Name: "digest", Type: FieldTypeBytesFixed, FixedLength: 32}}}},
 		},
 	}
 }
@@ -229,7 +232,7 @@ func streamModesSourceContract(r *JavaGenerationResult) error {
 	runtime, skeleton, endpoint := string(r.StreamRuntimeSource), string(r.SkeletonSource), string(r.StreamEndpointSource)
 	for _, check := range []struct{ label, source, want string }{
 		{"compact endpoint", endpoint, "            byte operation,\n            byte p1,\n"},
-		{"mode table", skeleton, "    private static final byte[] STREAM_MODES = {\n        (byte) 1, (byte) 2, (byte) 0, (byte) 2 };\n"},
+		{"mode table", skeleton, "    private static final byte[] STREAM_MODES = {\n        (byte) 1, (byte) 2, (byte) 0, (byte) 2,\n        (byte) 1 };\n"},
 		{"installed mode binding", skeleton, "this, this, STREAM_DIRECTIONS, STREAM_LIMITS, STREAM_MODES);"},
 		{"gate", runtime, "        if (!authenticated && (methodMode == MODE_AUTHENTICATED ||\n                (scalars[IDX_STATE] == STATE_WRITING &&\n                        scalars[IDX_METHOD_MODE] == MODE_AUTHENTICATED))) {\n            rejectWithoutClearing(SW_SECURITY_STATUS_NOT_SATISFIED);"},
 		{"chunk record transfer", runtime, "            requireRamSpan(callerWorkspace);\n            sha256.updateDigest(request, requestOffset, requestLength);"},
@@ -285,6 +288,7 @@ func TestStreamModesPublicInvalidationControls(t *testing.T) {
 	for _, tc := range []struct{ name, anchor, replacement, want string }{
 		{"noop", signature, signature + "        if (reason != 0) return;\n", "public invalidation retained upload"},
 		{"cancels-authenticated", preserve, "", "public invalidation cancelled issuer upload"},
+		{"retains-public-short-receipt", signature, signature + "        if (scalars[IDX_STATE] == STATE_SHORT_CLOSED && scalars[IDX_METHOD_MODE] == MODE_PUBLIC_INVALIDATE) return;\n", "public invalidation retained short receipt"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			output, err := mutateModeStoreRuntime(t, jar, [][2]string{{tc.anchor, tc.replacement}})

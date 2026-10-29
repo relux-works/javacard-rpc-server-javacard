@@ -53,8 +53,11 @@ whole session for lifecycle cleanup. Neither operation authenticates a caller.
 
 `TestStreamModesRealSimulator` exercises this boundary through a test-only
 ordinary APDU on both transport routes and lifecycle modes. The paired
-`TestStreamModesPublicInvalidationControls` plants a no-op and unconditional
-clearing; the same runtime witness must reject both by their intended assertion.
+`TestStreamModesPublicInvalidationControls` plants a no-op, unconditional
+clearing and retention of a public cached short receipt. The same runtime
+witness must reject each by its intended assertion. The receipt check first
+establishes a successful cached retry, then retries immediately after invalidation
+so a separate refusal cannot clear the state before observation.
 These are simulator/logical-store checks, not physical-card qualification.
 
 - A method without a mode stages nothing before authentication: an
