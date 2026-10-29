@@ -19,8 +19,11 @@ requirements; this candidate note is not a completed release verdict.
 
 For reset-scoped streams the digest must support `externalAccess=true`, since
 an associated Security Domain may forward data while another applet is selected.
-Host qualification uses `works.relux:jcardsim:3.0.5.9-relux.2`, which supports
-that API. Upstream `com.klinec:jcardsim:3.0.5.9` throws `CryptoException` during
+Host qualification uses `works.relux:jcardsim:3.0.5.9-relux.4`, which supports
+that API and logical-channel routing. The complete suite also checks that an
+unopened channel is rejected by the simulator before AppletBase dispatch; the
+older relux.2 and upstream 3.0.5.9 simulators lack that routing behavior and cannot
+qualify this control. Upstream `com.klinec:jcardsim:3.0.5.9` throws `CryptoException` during
 reset-scoped fixture construction at `MessageDigest.getInstance`; deselect-scoped
 tests and public-invalidation controls run there. This is a simulator limitation,
 not a reason to weaken the generated digest's required access semantics.
