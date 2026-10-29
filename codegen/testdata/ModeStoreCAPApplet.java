@@ -110,6 +110,12 @@ public final class ModeStoreCAPApplet extends Applet {
             return (short) 36;
         }
 
+        // The public mode uses the same short-result handler as the simulator fixture.
+        protected short onDescribePublicPageStream(byte[] input, short io, short length, byte[] output,
+                short oo, short oc, byte[] w, short wo, short wc) {
+            return onDescribePageStream(input, io, length, output, oo, oc, w, wo, wc);
+        }
+
         protected short onExchangePagePrepare(byte[] input, short io, short length,
                 byte[] w, short wo, short wc) {
             return length;

@@ -13,19 +13,19 @@ and the split between historical generation and current-source receipts.
 Java Card code-generation backend and on-card runtime for
 [javacard-rpc](https://github.com/relux-works/javacard-rpc). The root repository tag
 versions both components: the Go backend lives in codegen/ and the Java runtime
-keeps its normal root Gradle layout. The `v0.7.0` release candidate pairs Go module
-version `v0.7.0` with runtime version `0.7.0` at the same repository commit. Runtime
-coordinates are `io.jcrpc:javacard-rpc-server-javacard:0.7.0`; the group, artifact
+keeps its normal root Gradle layout. The `v0.8.0` release candidate pairs Go module
+version `v0.8.0` with runtime version `0.8.0` at the same repository commit. Runtime
+coordinates are `io.jcrpc:javacard-rpc-server-javacard:0.8.0`; the group, artifact
 name and Java package `io.jcrpc.server` are unchanged.
 
 ## Version pins
 
 Use the root module version for the backend:
 
-The following pins and tag commands apply once `v0.7.0` is published.
+The following pins and tag commands apply once `v0.8.0` is published.
 
 ```sh
-go get github.com/relux-works/javacard-rpc-server-javacard@v0.7.0
+go get github.com/relux-works/javacard-rpc-server-javacard@v0.8.0
 ```
 
 Build the runtime from the same root tag with the included Gradle wrapper:
@@ -33,16 +33,16 @@ Build the runtime from the same root tag with the included Gradle wrapper:
 ```sh
 git clone https://github.com/relux-works/javacard-rpc-server-javacard.git
 cd javacard-rpc-server-javacard
-git verify-tag v0.7.0
-git checkout --detach v0.7.0
-git rev-parse 'v0.7.0^{commit}'
+git verify-tag v0.8.0
+git checkout --detach v0.8.0
+git rev-parse 'v0.8.0^{commit}'
 ./gradlew build --no-daemon
 ```
 
 The peeled tag commit identifies both components; the runtime jar is
-`build/libs/javacard-rpc-server-javacard-0.7.0.jar`. These instructions build
+`build/libs/javacard-rpc-server-javacard-0.8.0.jar`. These instructions build
 from source; they do not require a Maven repository publication. See
-[release notes](RELEASE-NOTES-0.7.0.md) for compatibility and verification limits.
+[release notes](RELEASE-NOTES-0.8.0.md) for compatibility and verification limits.
 
 ## Requirements
 
