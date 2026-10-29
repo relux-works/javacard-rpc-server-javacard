@@ -1,5 +1,9 @@
 # javacard-rpc-server-javacard
 
+Current mixed-mode generation includes public-only session invalidation; see
+[`STREAM-MODES.md`](STREAM-MODES.md#authority) for its authority and cleanup
+contract. It is an additive source change pending a new reviewed release.
+
 The ModeStore stream-mode fixture uses independent circular-store seeks,
 page preview and page description. BatchStore fixture responses encode their
 declared scalar fields, including canonical booleans. See

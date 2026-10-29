@@ -46,6 +46,7 @@ public class ModeStoreHarness {
             if (only.equals("all") || only.equals("public")) publicStreams();
             if (only.equals("all") || only.equals("record transfer")) recordStreams();
             if (only.equals("all") || only.equals("authority")) authority();
+            if (only.equals("all") || only.equals("invalidation")) publicInvalidation();
             if (only.equals("all") || only.equals("bounds")) requestBounds();
             if (direct && (only.equals("all") || only.equals("spans"))) spanRecordTransfer();
         }
@@ -536,6 +537,54 @@ public class ModeStoreHarness {
         expect(0x6985, PUT + CLOSE, 0, 0, close(leaf), 0, "authenticated foreign refusal wrote persistent");
         auth(false);
         expect(0x6A80, PREVIEW, 1, 2, Arrays.copyOfRange(in, 192, 352), 0, "authenticated foreign refusal retained public handle");
+    }
+
+    // A current applet-side access refusal must invalidate public output and uploads,
+    // without giving the same unauthenticated entry a way to cancel issuer work.
+    // Every cleanup APDU must request zero persistent stores. Both transport routes run it.
+    static void publicInvalidation() throws Exception {
+        reset();
+        auth(false);
+        byte[] input = chunk(352, 5);
+        publicFirst(Arrays.copyOf(input, 192));
+        expect(0x9000, 0x02, 0, 0, EMPTY, 0, "public invalidation wrote persistent");
+        expect(0x6A80, PREVIEW, 1, 2, Arrays.copyOfRange(input, 192, 352), 0,
+                "public invalidation retained upload");
+        publicClosed(input, "fresh public session after invalidation");
+        expect(0x9000, 0x02, 0, 0, EMPTY, 0, "pending output invalidation wrote persistent");
+        expect(0x6985, PREVIEW + READ, 0, 2, EMPTY, 0, "public invalidation retained output");
+        expect(0x6985, PREVIEW + CLOSE, 0, 0, close(input), 0, "public invalidation revived CLOSE receipt");
+
+        byte[] seeks = offsets(194);
+        expect(0x9000, INSPECT, 0, 2, part(seeks, 0), 0, "chunked invalidation control");
+        expect(0x9000, 0x02, 0, 0, EMPTY, 0, "chunked invalidation wrote persistent");
+        expect(0x6A80, INSPECT, 1, 2, part(seeks, 1), 0, "public invalidation retained chunked input");
+        inspectSession(seeks, "fresh chunked session after invalidation");
+
+        recordUpload(input, "chunked streamed output invalidation control");
+        expect(0x9000, WINDOW + CLOSE, 0, 0, close(input), 0, "chunked streamed output close");
+        expect(0x9000, 0x02, 0, 0, EMPTY, 0, "chunked output invalidation wrote persistent");
+        expect(0x6985, WINDOW + READ, 0, 4, EMPTY, 0, "public invalidation retained chunked output");
+
+        byte[] page = chunk(197, 9);
+        auth(true);
+        expect(0x9000, PUT, 0, 2, part(page, 0), 192, "issuer invalidation control");
+        auth(false);
+        expect(0x9000, 0x02, 0, 0, EMPTY, 0, "public invalidation during issuer upload wrote persistent");
+        auth(true);
+        // A duplicate writes zero; a cancelled session would stage the first 192 bytes again.
+        expect(0x9000, PUT, 0, 2, part(page, 0), 0, "public invalidation cancelled issuer upload");
+        expect(0x9000, PUT, 1, 2, part(page, 1), 5, "issuer continuation after public invalidation");
+        byte[] receipt = expect(0x9000, PUT + CLOSE, 0, 0, close(page), 36, "issuer completion after public invalidation");
+        if (receipt.length != 36 || !Arrays.equals(Arrays.copyOfRange(receipt, 4, 36), digest(page)))
+            throw new AssertionError("issuer completion digest after public invalidation");
+        auth(false);
+        expect(0x9000, 0x02, 0, 0, EMPTY, 0, "public invalidation during issuer receipt wrote persistent");
+        auth(true);
+        expect(0x9000, PUT + CLOSE, 0, 0, close(page), 0, "public invalidation cancelled issuer receipt");
+        expect(0x9000, PUT, 0, 2, part(page, 0), 192, "full abort issuer control");
+        expect(0x9000, PUT + ABORT, 0, 0, EMPTY, 0, "full abort must remain available");
+        expect(0x6A80, PUT, 1, 2, part(page, 1), 0, "full abort retained issuer upload");
     }
 
     // ----------------------------------------------------------- request bounds

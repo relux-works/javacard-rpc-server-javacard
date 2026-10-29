@@ -265,6 +265,36 @@ func TestStreamModesSourceContract(t *testing.T) {
 	}
 }
 
+// Generation exposes the public-only cleanup on mixed-mode runtimes, preserving the
+// authenticated-only generated contract. Runtime behavior is tested by ModeStoreHarness.
+func TestStreamModesPublicInvalidationSurface(t *testing.T) {
+	r := modeStoreResult(t, StreamMemoryClearOnDeselect)
+	for name, source := range map[string][]byte{"endpoint": r.StreamEndpointSource, "runtime": r.StreamRuntimeSource, "skeleton": r.SkeletonSource} {
+		if !strings.Contains(string(source), "abortPublic") {
+			t.Errorf("%s lacks public-session invalidation", name)
+		}
+	}
+}
+
+// Known violations must fail the real simulator witness by its intended assertion:
+// a no-op retains public authority, and unconditional clearing cancels issuer work.
+func TestStreamModesPublicInvalidationControls(t *testing.T) {
+	jar := simulatorJar(t)
+	const signature = "    public void abortPublic(byte reason) {\n"
+	const preserve = "        if (scalars[IDX_STATE] != STATE_EMPTY && scalars[IDX_METHOD_MODE] == MODE_AUTHENTICATED) {\n            return;\n        }\n"
+	for _, tc := range []struct{ name, anchor, replacement, want string }{
+		{"noop", signature, signature + "        if (reason != 0) return;\n", "public invalidation retained upload"},
+		{"cancels-authenticated", preserve, "", "public invalidation cancelled issuer upload"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			output, err := mutateModeStoreRuntime(t, jar, [][2]string{{tc.anchor, tc.replacement}})
+			if err == nil || !strings.Contains(output, tc.want) {
+				t.Fatalf("expected %q violation, got %v\n%s", tc.want, err, output)
+			}
+		})
+	}
+}
+
 // mutateModeStoreRuntime applies edits whose anchors must each appear exactly once,
 // then runs the full behavioral suite.
 func mutateModeStoreRuntime(t *testing.T, jar string, edits [][2]string) (string, error) {

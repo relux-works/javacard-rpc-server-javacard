@@ -71,6 +71,14 @@ public interface {{.StreamEndpointName}} {
             boolean authenticated{{end}});
 
     void abort(byte reason);
+{{- if .StreamMixed}}
+
+    /** Invalidate public/chunked authority without cancelling a live authenticated upload.
+     *  Clears transient session metadata, without erasing persistent staging.
+     *  The owning applet separately clears its public handler's transient state.
+     */
+    void abortPublic(byte reason);
+{{- end}}
 
     interface Handler {
         /**
@@ -495,6 +503,16 @@ public final class {{.StreamRuntimeName}} implements {{.StreamEndpointName}} {
         }
 {{end}}        clearAll();
     }
+
+{{- if .StreamMixed}}
+    @Override
+    public void abortPublic(byte reason) {
+        if (scalars[IDX_STATE] != STATE_EMPTY && scalars[IDX_METHOD_MODE] == MODE_AUTHENTICATED) {
+            return;
+        }
+        clearAll();
+    }
+{{- end}}
 
     private boolean hasRequestStream() {
         return scalars[IDX_HAS_REQUEST_STREAM] != 0;
@@ -1527,7 +1545,16 @@ func buildJavaStreamDispatchSupport(data *javaTemplateData, methods []javaMethod
         streamSession.abort(reason);
     }
 
-    public final boolean isStreamInstruction(byte ins) {
+`)
+	if data.StreamMixed {
+		b.WriteString(`    /** Invalidate public/chunked sessions; preserve authenticated uploads. */
+    public final void abortPublicStreams(byte reason) {
+        streamSession.abortPublic(reason);
+    }
+
+`)
+	}
+	b.WriteString(`    public final boolean isStreamInstruction(byte ins) {
         return streamRow(ins) >= (short) 0;
     }
 

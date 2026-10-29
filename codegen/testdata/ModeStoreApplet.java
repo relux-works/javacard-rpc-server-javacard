@@ -51,6 +51,11 @@ public final class ModeStoreApplet extends Applet {
         if (selectingApplet()) return;
         byte[] buf = apdu.getBuffer();
         NvmLedger.apdu = buf;
+        // Test-only ordinary entry: the applet invalidates public authority outside dispatch.
+        if (buf[ISO7816.OFFSET_INS] == (byte) 0x02) {
+            logic.abortPublicStreams(ModeStoreStreamEndpoint.ABORT_HOST_FAILURE);
+            return;
+        }
         if (logic.isStreamInstruction(buf[ISO7816.OFFSET_INS])) {
             if (!direct) {
                 adapter.processIfStream(apdu, authenticated);

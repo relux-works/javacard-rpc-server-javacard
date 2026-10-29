@@ -41,6 +41,22 @@ any effect.
 
 ## Authority
 
+Mixed-mode skeletons expose `abortPublicStreams(reason)`, with the matching
+`StreamEndpoint.abortPublic(reason)` operation. An applet can invalidate a
+public/chunked upload, cached short receipt or pending streamed result when its
+own current access policy rejects an ordinary entry. This clears transient
+session metadata only; retained staging bytes stay unaddressed. It preserves a
+live authenticated session, including its completed receipt, so an ordinary
+access refusal cannot cancel an issuer upload. The applet separately clears its
+public handler's transient state. Full `abortStreams(reason)` still clears the
+whole session for lifecycle cleanup. Neither operation authenticates a caller.
+
+`TestStreamModesRealSimulator` exercises this boundary through a test-only
+ordinary APDU on both transport routes and lifecycle modes. The paired
+`TestStreamModesPublicInvalidationControls` plants a no-op and unconditional
+clearing; the same runtime witness must reject both by their intended assertion.
+These are simulator/logical-store checks, not physical-card qualification.
+
 - A method without a mode stages nothing before authentication: an
   unauthenticated APDU is refused `6982` before any session or persistent
   effect, as in the authenticated contract.
