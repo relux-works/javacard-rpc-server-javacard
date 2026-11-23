@@ -23,7 +23,7 @@ public final class ModeStoreApplet extends Applet {
     // 2 persistent caller workspace, 3 transient response.
     static int output = 0;
     static int chunkCalls = 0, maxChunk = 0, finishCalls = 0, prepareCalls = 0, produceCalls = 0, stagedCalls = 0;
-    static boolean chunkFromPersistent = false;
+    static boolean chunkFromPersistent = false, managedAtInstall = false;
     // Storage window length and the producer call after which a drifting
     // producer changes its bytes.
     static short windowLength = 600;
@@ -94,9 +94,35 @@ public final class ModeStoreApplet extends Applet {
         final byte[] storedBytes = new byte[STORE_CAPACITY];
         final MessageDigest pageDigest = MessageDigest.getInstance(MessageDigest.ALG_SHA_256, false);
 
+        final ManagedWorkspace managed;
+
         Logic() {
             super(null);
+            managed = managedAtInstall ? new ManagedWorkspace() : null;
+            if (managed != null) configurePublicStreamWorkspace(managed);
             for (short i = 0; i < STORE_CAPACITY; i++) storedBytes[i] = (byte) (i / 16 + i % 16);
+        }
+
+        @Override
+        public short prepareVerifiedChunkedResult(byte method, short length, byte[] digest,
+                byte[] workspace, short offset, short capacity) {
+            short total = super.prepareVerifiedChunkedResult(method, length, digest, workspace, offset, capacity);
+            if (managed != null && method == streamMethodId((byte) 0x43)) {
+                byte[] result = managed.acquire();
+                for (short i = 0; i < total; i++) {
+                    NvmLedger.store(result);
+                    result[i] = storedBytes[(short) ((seeks[1] + i) % STORE_CAPACITY)];
+                }
+                Util.arrayCopyNonAtomic(digest, (short) 0, managed.verified, (short) 0, (short) 32);
+                managed.verifiedCalls++;
+            }
+            return total;
+        }
+
+        @Override
+        public byte[] preparedStreamResult(byte method) {
+            if (managed == null || method != streamMethodId((byte) 0x43)) return null;
+            return control == 10 ? storedBytes : managed.current();
         }
 
         protected byte onGetVersion(byte[] w, short wo, short wc) { return 1; }
@@ -242,6 +268,22 @@ public final class ModeStoreApplet extends Applet {
             produceCalls++;
             if (failProduceAt != 0 && produceCalls == failProduceAt) failStream((short) 0x6F00);
         }
+    }
+}
+
+final class ManagedWorkspace implements ModeStoreStreamEndpoint.PublicStreamWorkspace {
+    final byte[] bytes = JCSystem.makeTransientByteArray((short) 1472, JCSystem.CLEAR_ON_RESET);
+    final byte[] verified = JCSystem.makeTransientByteArray((short) 32, JCSystem.CLEAR_ON_RESET);
+    int verifiedCalls;
+    boolean live;
+
+    public short capacity() { return (short) bytes.length; }
+    public byte[] acquire() { live = true; return bytes; }
+    public byte[] current() { return live ? bytes : null; }
+    public void finished(byte methodId) { abandoned(); }
+    public void abandoned() {
+        Util.arrayFillNonAtomic(bytes, (short) 0, (short) bytes.length, (byte) 0);
+        live = false;
     }
 }
 

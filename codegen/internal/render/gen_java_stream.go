@@ -178,6 +178,40 @@ public interface {{.StreamEndpointName}} {
 {{- end}}
     }
 
+{{- if .StreamMixed}}
+
+    /** Optional transient storage for public methods that return a stream. */
+    interface PublicStreamWorkspace {
+        short capacity();
+        byte[] acquire();
+        byte[] current();
+
+        /** The verified response is closed; the owner can clear and release its RAM. */
+        void finished(byte methodId);
+
+        /** Discard data from an abandoned public stream, including an explicit abort. */
+        void abandoned();
+    }
+
+    /** Optional fast path for streamed results, with the same wire contract as Handler. */
+    interface PreparedResultHandler extends Handler {
+        /**
+         * Prepare a result after the runtime matched the chunked request's SHA-256.
+         * verifiedDigest is a borrowed, read-only 32-byte array valid only during this call.
+         */
+        short prepareVerifiedChunkedResult(
+                byte methodId, short inputLength, byte[] verifiedDigest,
+                byte[] callerWorkspace, short callerWorkspaceOffset, short callerWorkspaceCapacity);
+
+        /**
+         * Return the transient prepared result beginning at offset zero, or null to use
+         * produceResult. The first resultLength bytes must match the bytes that READ_CHUNK
+         * will deliver. The runtime borrows this array only to compute the descriptor hash.
+         */
+        byte[] preparedStreamResult(byte methodId);
+    }
+{{- end}}
+
     interface Sha256 {
         void digest(
                 byte[] input,
@@ -324,6 +358,7 @@ public final class {{.StreamRuntimeName}} implements {{.StreamEndpointName}} {
     private final byte[] methodDirections;
     private final short[] methodLimits;
 {{if .StreamMixed}}    private final byte[] methodModes;
+    private PublicStreamWorkspace publicWorkspace;
 {{end}}    private static final short LIMIT_COLUMNS = (short) 5;
     private final StreamStatusWordException failure;
 {{if and .StreamWorkspacePersistent (not .StreamAuthenticated)}}    private final byte[] resetMarker;
@@ -501,6 +536,9 @@ public final class {{.StreamRuntimeName}} implements {{.StreamEndpointName}} {
             wipe(workspace);
             resetMarker[0] = (byte) 1;
         }
+{{end}}{{if .StreamMixed}}        if (reason == ABORT_EXPLICIT && publicWorkspace != null && !hasOpenPublicResult()) {
+            publicWorkspace.abandoned();
+        }
 {{end}}        clearAll();
     }
 
@@ -510,7 +548,31 @@ public final class {{.StreamRuntimeName}} implements {{.StreamEndpointName}} {
         if (scalars[IDX_STATE] != STATE_EMPTY && scalars[IDX_METHOD_MODE] == MODE_AUTHENTICATED) {
             return;
         }
+        if (publicWorkspace != null && !hasOpenPublicResult()) {
+            publicWorkspace.abandoned();
+        }
         clearAll();
+    }
+{{- end}}
+
+{{- if .StreamMixed}}
+
+    /** Bind once during construction, before the first dispatch. */
+    void configurePublicWorkspace(PublicStreamWorkspace storage) {
+        if (storage == null || publicWorkspace != null || scalars[IDX_STATE] != STATE_EMPTY ||
+                storage.capacity() <= 0) {
+            fail(SW_INVALID_DATA);
+        }
+        publicWorkspace = storage;
+    }
+
+    private boolean usesPublicWorkspace(byte mode, boolean responseEnabled) {
+        return publicWorkspace != null && responseEnabled && mode == MODE_PUBLIC_INVALIDATE;
+    }
+
+    private byte[] uploadWorkspace() {
+        return usesPublicWorkspace((byte) scalars[IDX_METHOD_MODE], hasResponseStream())
+                ? publicWorkspace.current() : workspace;
     }
 {{- end}}
 
@@ -561,7 +623,8 @@ public final class {{.StreamRuntimeName}} implements {{.StreamEndpointName}} {
                 (!responseEnabled &&
                         (shortResponseLength < (short) -1 ||
                                 shortResponseLength > SHORT_RESPONSE_CAPACITY)) ||
-                required > workspace.length{{if .StreamMixed}} ||
+                required > {{if .StreamMixed}}(usesPublicWorkspace(methodMode, responseEnabled)
+                        ? publicWorkspace.capacity() : workspace.length){{else}}workspace.length{{end}}{{if .StreamMixed}} ||
                 // Every mode needs a request stream. Only a public or chunked
                 // method may stream its result, and only through the RAM producer.
                 !requestEnabled ||
@@ -632,7 +695,7 @@ public final class {{.StreamRuntimeName}} implements {{.StreamEndpointName}} {
 {{- end}}
             if (count != (scalars[IDX_PACKET_COUNT] & 0xFF) ||
                     length != (scalars[IDX_LAST_CHUNK_LENGTH] & 0xFFFF) ||
-                    !equalsRange(workspace, scalars[IDX_LAST_CHUNK_OFFSET],
+                    !equalsRange({{if .StreamMixed}}uploadWorkspace(){{else}}workspace{{end}}, scalars[IDX_LAST_CHUNK_OFFSET],
                             request, requestOffset, requestLength)) {
                 fail(SW_INVALID_DATA);
             }
@@ -677,8 +740,20 @@ public final class {{.StreamRuntimeName}} implements {{.StreamEndpointName}} {
         scalars[IDX_LAST_CHUNK_OFFSET] = scalars[IDX_INPUT_LENGTH];
         scalars[IDX_LAST_CHUNK_LENGTH] = requestLength;
 {{if .StreamCleanupTracked}}        markWritten(scalars[IDX_INPUT_LENGTH], requestLength);
-{{end}}        copy(request, requestOffset, workspace, scalars[IDX_INPUT_LENGTH], requestLength);
-        scalars[IDX_INPUT_LENGTH] = (short) ((scalars[IDX_INPUT_LENGTH] & 0xFFFF) + length);
+{{end}}{{if .StreamMixed}}        if (usesPublicWorkspace((byte) scalars[IDX_METHOD_MODE], hasResponseStream())) {
+            byte[] staged = publicWorkspace.acquire();
+            if (staged == null || staged == request || staged == response || staged == callerWorkspace ||
+                    staged.length < scalars[IDX_REQUEST_MAX_LENGTH] ||
+                    javacard.framework.JCSystem.isTransient(staged) == javacard.framework.JCSystem.NOT_A_TRANSIENT_OBJECT) {
+                fail(SW_NO_MEMORY);
+            }
+            javacard.framework.Util.arrayCopyNonAtomic(
+                    request, requestOffset, staged, scalars[IDX_INPUT_LENGTH], requestLength);
+        } else {
+            copy(request, requestOffset, workspace, scalars[IDX_INPUT_LENGTH], requestLength);
+        }
+{{else}}        copy(request, requestOffset, workspace, scalars[IDX_INPUT_LENGTH], requestLength);
+{{end}}        scalars[IDX_INPUT_LENGTH] = (short) ((scalars[IDX_INPUT_LENGTH] & 0xFFFF) + length);
         scalars[IDX_NEXT_PACKET_INDEX] = (short) (index + 1);
         return (short) 0;
     }
@@ -731,7 +806,7 @@ public final class {{.StreamRuntimeName}} implements {{.StreamEndpointName}} {
         // The engine is shared with running digests; never inherit their state.
         sha256.resetDigest();
 {{- end}}
-        sha256.digest(workspace, (short) 0, scalars[IDX_INPUT_LENGTH], digestScratch, (short) 0);
+        sha256.digest({{if .StreamMixed}}uploadWorkspace(){{else}}workspace{{end}}, (short) 0, scalars[IDX_INPUT_LENGTH], digestScratch, (short) 0);
         if (!equalsRange(digestScratch, (short) 0, request, digestOffset, DIGEST_LENGTH)) {
             fail(SW_INVALID_DATA);
         }
@@ -787,9 +862,9 @@ public final class {{.StreamRuntimeName}} implements {{.StreamEndpointName}} {
 
     /**
      * CLOSE_WRITE with a streamed result (MODE_PUBLIC_INVALIDATE or MODE_CHUNKED):
-     * the handler prepares the result, then produces it chunk by chunk into the
-     * admitted RAM response span only to digest it. The result is never stored;
-     * READ_CHUNK produces each chunk again. The descriptor is written last.
+     * the handler prepares the result, then the runtime hashes its transient bytes
+     * or uses the admitted RAM response span to hash the output chunk by chunk.
+     * READ_CHUNK uses the same producer contract. The descriptor is written last.
      */
     private short prepareStreamedResult(
             byte[] response,
@@ -803,12 +878,41 @@ public final class {{.StreamRuntimeName}} implements {{.StreamEndpointName}} {
                 chunkSize > DESCRIPTOR_LENGTH ? chunkSize : DESCRIPTOR_LENGTH);
         Handler handler = (Handler) handlerSlot[IDX_HANDLER];
         byte method = (byte) scalars[IDX_ACTIVE_METHOD];
-        short total = handler.prepareResult(method, stagedInput(), (short) 0, scalars[IDX_INPUT_LENGTH],
-                callerWorkspace, callerWorkspaceOffset, callerWorkspaceCapacity);
+        PreparedResultHandler preparedHandler = handler instanceof PreparedResultHandler
+                ? (PreparedResultHandler) handler : null;
+        short total;
+        if (preparedHandler != null && scalars[IDX_METHOD_MODE] == MODE_CHUNKED) {
+            total = preparedHandler.prepareVerifiedChunkedResult(method, scalars[IDX_INPUT_LENGTH],
+                    digestScratch, callerWorkspace, callerWorkspaceOffset, callerWorkspaceCapacity);
+        } else {
+            total = handler.prepareResult(method, stagedInput(), (short) 0, scalars[IDX_INPUT_LENGTH],
+                    callerWorkspace, callerWorkspaceOffset, callerWorkspaceCapacity);
+        }
         if (total <= 0 || total > scalars[IDX_RESPONSE_MAX_LENGTH]) {
             fail(SW_WRONG_LENGTH);
         }
         sha256.resetDigest();
+        byte[] prepared = preparedHandler == null ? null : preparedHandler.preparedStreamResult(method);
+        if (prepared == null) {
+            hashProducedResult(handler, method, total, chunkSize, response, responseOffset,
+                    callerWorkspace, callerWorkspaceOffset, callerWorkspaceCapacity);
+        } else {
+            if (prepared.length < total || prepared == digestScratch || prepared == response ||
+                    prepared == callerWorkspace ||
+                    javacard.framework.JCSystem.isTransient(prepared) == javacard.framework.JCSystem.NOT_A_TRANSIENT_OBJECT) {
+                fail(SW_INVALID_DATA);
+            }
+            sha256.digest(prepared, (short) 0, total, digestScratch, (short) 0);
+        }
+        scalars[IDX_RESULT_LENGTH] = total;
+        scalars[IDX_RESULT_PACKET_COUNT] = (short) ((total + chunkSize - 1) / chunkSize);
+        scalars[IDX_STATE] = STATE_READ_PENDING;
+        return writeDescriptor(response, responseOffset, responseCapacity);
+    }
+
+    private void hashProducedResult(Handler handler, byte method, short total, short chunkSize,
+            byte[] response, short responseOffset, byte[] callerWorkspace,
+            short callerWorkspaceOffset, short callerWorkspaceCapacity) {
         short offset = (short) 0;
         while (offset < total) {
             short length = (short) (total - offset);
@@ -822,15 +926,11 @@ public final class {{.StreamRuntimeName}} implements {{.StreamEndpointName}} {
             offset = (short) (offset + length);
         }
         sha256.digest(response, responseOffset, (short) 0, digestScratch, (short) 0);
-        scalars[IDX_RESULT_LENGTH] = total;
-        scalars[IDX_RESULT_PACKET_COUNT] = (short) ((total + chunkSize - 1) / chunkSize);
-        scalars[IDX_STATE] = STATE_READ_PENDING;
-        return writeDescriptor(response, responseOffset, responseCapacity);
     }
 
     /** The staged request a producer may read: none for MODE_CHUNKED. */
     private byte[] stagedInput() {
-        return scalars[IDX_METHOD_MODE] == MODE_CHUNKED ? null : workspace;
+        return scalars[IDX_METHOD_MODE] == MODE_CHUNKED ? null : uploadWorkspace();
     }
 {{- end}}
 
@@ -978,7 +1078,10 @@ public final class {{.StreamRuntimeName}} implements {{.StreamEndpointName}} {
             fail(SW_INVALID_DATA);
         }
         if (scalars[IDX_STATE] == STATE_READ_PENDING) {
-            {{if .StreamAuthenticated}}// Invalidate only: retained public bytes are not erased.{{else if .StreamCleanupTracked}}wipeWritten();{{else}}wipe(workspace);{{end}}
+{{if .StreamMixed}}            if (publicWorkspace != null && scalars[IDX_METHOD_MODE] != MODE_AUTHENTICATED) {
+                publicWorkspace.finished((byte) scalars[IDX_ACTIVE_METHOD]);
+            }
+{{end}}            {{if .StreamAuthenticated}}// Invalidate only: retained public bytes are not erased.{{else if .StreamCleanupTracked}}wipeWritten();{{else}}wipe(workspace);{{end}}
             scalars[IDX_STATE] = STATE_READ_CLOSED;
         }
         return (short) 0;
@@ -1091,14 +1194,25 @@ public final class {{.StreamRuntimeName}} implements {{.StreamEndpointName}} {
 {{else}}     * Return to the empty state. Writes only the injected transient arrays,
      * so the result is bit-identical to a freshly cleared transient array.
 {{end}}     */
+{{- if .StreamMixed}}
+    private boolean hasOpenPublicResult() {
+        return hasResponseStream() && scalars[IDX_METHOD_MODE] != MODE_AUTHENTICATED &&
+                scalars[IDX_STATE] != STATE_READ_CLOSED;
+    }
+
+{{- end}}
     private void clearAll() {
-        {{if .StreamAuthenticated}}// Never writes the persistent workspace; see the class contract.{{else if .StreamCleanupTracked}}wipeWritten();{{else}}wipe(workspace);{{end}}
+{{if .StreamMixed}}        boolean release = publicWorkspace != null && hasOpenPublicResult();
+{{end}}        {{if .StreamAuthenticated}}// Never writes the persistent workspace; see the class contract.{{else if .StreamCleanupTracked}}wipeWritten();{{else}}wipe(workspace);{{end}}
         wipe(digestScratch);
         for (short i = 0; i < SCALAR_COUNT; i++) {
             scalars[i] = (short) 0;
         }
         handlerSlot[IDX_HANDLER] = null;
-    }
+{{if .StreamMixed}}        if (release) {
+            publicWorkspace.abandoned();
+        }
+{{end}}    }
 
     private void fail(short statusWord) {
         clearAll();
@@ -1315,8 +1429,12 @@ import javacard.security.MessageDigest;
 	source = strings.Replace(source, packageNeedle, imports, 1)
 
 	classNeedle := "public abstract class " + data.ClassName + " {"
+	handler := ".Handler"
+	if data.StreamMixed {
+		handler = ".PreparedResultHandler"
+	}
 	classReplacement := "public abstract class " + data.ClassName + " implements " +
-		data.StreamEndpointName + ".Handler, " + data.StreamEndpointName + ".Sha256 {"
+		data.StreamEndpointName + handler + ", " + data.StreamEndpointName + ".Sha256 {"
 	if !strings.Contains(source, classNeedle) {
 		return "", fmt.Errorf("augment Java stream skeleton: class insertion point not found")
 	}
@@ -1547,9 +1665,33 @@ func buildJavaStreamDispatchSupport(data *javaTemplateData, methods []javaMethod
 
 `)
 	if data.StreamMixed {
+		fmt.Fprintf(&b, `    /** Bind a public stream workspace at installation. */
+    protected final void configurePublicStreamWorkspace(%s.PublicStreamWorkspace storage) {
+        streamSession.configurePublicWorkspace(storage);
+    }
+
+`, data.StreamEndpointName)
 		b.WriteString(`    /** Invalidate public/chunked sessions; preserve authenticated uploads. */
     public final void abortPublicStreams(byte reason) {
         streamSession.abortPublic(reason);
+    }
+
+    /** Resolve a generated stream's 1-based handler method id, or zero when unknown. */
+    protected final byte streamMethodId(byte instruction) {
+        return (byte) (streamRow(instruction) + 1);
+    }
+
+    @Override
+    public short prepareVerifiedChunkedResult(
+            byte methodId, short inputLength, byte[] verifiedDigest,
+            byte[] callerWorkspace, short callerWorkspaceOffset, short callerWorkspaceCapacity) {
+        return prepareResult(methodId, null, (short) 0, inputLength,
+                callerWorkspace, callerWorkspaceOffset, callerWorkspaceCapacity);
+    }
+
+    @Override
+    public byte[] preparedStreamResult(byte methodId) {
+        return null;
     }
 
 `)

@@ -169,12 +169,13 @@ var (
 	// Every element store in generated code is one statement per line.
 	nvmStoreLine = regexp.MustCompile(`(?m)^([ \t]*)(?:this\.)?(\w+)\[[^\n]*\] = [^\n]*;$`)
 	// Any array element assignment, compound assignment or increment.
-	nvmAnyStore = regexp.MustCompile(`\]\s*(=[^=]|\+=|-=|\*=|/=|\|=|&=|\^=|<<=|>>=|\+\+|--)`)
-	nvmDigest   = "        streamSha256.doFinal(input, inputOffset, inputLength, output, outputOffset);"
+	nvmAnyStore   = regexp.MustCompile(`\]\s*(=[^=]|\+=|-=|\*=|/=|\|=|&=|\^=|<<=|>>=|\+\+|--)`)
+	nvmDigest     = "        streamSha256.doFinal(input, inputOffset, inputLength, output, outputOffset);"
+	nvmPublicCopy = "            javacard.framework.Util.arrayCopyNonAtomic(\n" +
+		"                    request, requestOffset, staged, scalars[IDX_INPUT_LENGTH], requestLength);"
 )
 
-// instrumentNvm prefixes every array element store and the one native digest
-// writer in the generated sources with NvmLedger.store(target). Completeness is
+// instrumentNvm prefixes every array element store and each recognized native writer in the generated sources with NvmLedger.store(target). Completeness is
 // checked: a store the pattern cannot attribute, or any bulk-copy API, fails
 // the test instead of silently escaping the ledger.
 func instrumentNvm(t *testing.T, r *JavaGenerationResult) *JavaGenerationResult {
@@ -183,7 +184,9 @@ func instrumentNvm(t *testing.T, r *JavaGenerationResult) *JavaGenerationResult 
 	for _, source := range []*[]byte{&result.TransportSource, &result.SkeletonSource, &result.StreamEndpointSource, &result.StreamRuntimeSource, &result.StreamAPDUAdapterSource} {
 		text := string(*source)
 		code := javaCodeOnly(text)
-		if regexp.MustCompile(`Util\.array|arraycopy\(|\.doFinal\(|\.sign\(|\.generateData\(|\.getBytes\(`).MatchString(strings.Replace(code, strings.TrimSpace(nvmDigest), "", 1)) {
+		nativeWriters := strings.Replace(code, nvmDigest, "", 1)
+		nativeWriters = strings.Replace(nativeWriters, nvmPublicCopy, "", 1)
+		if regexp.MustCompile(`Util\.array|arraycopy\(|\.doFinal\(|\.sign\(|\.generateData\(|\.getBytes\(`).MatchString(nativeWriters) {
 			t.Fatal("generated source calls a bulk writer outside the ledger")
 		}
 		want := len(nvmAnyStore.FindAllStringIndex(code, -1))
@@ -199,6 +202,8 @@ func instrumentNvm(t *testing.T, r *JavaGenerationResult) *JavaGenerationResult 
 		if strings.Contains(text, nvmDigest) {
 			text = strings.Replace(text, nvmDigest, "        NvmLedger.store(output);\n"+nvmDigest, 1)
 		}
+		text = strings.Replace(text, nvmPublicCopy,
+			"            for (short counted = 0; counted < requestLength; counted++) NvmLedger.store(staged);\n"+nvmPublicCopy, 1)
 		*source = []byte(text)
 	}
 	return &result

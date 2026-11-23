@@ -51,7 +51,55 @@ public class ModeStoreHarness {
             if (direct && (only.equals("all") || only.equals("spans"))) spanRecordTransfer();
         }
         runtimeRefusals(session);
+        if (only.equals("all")) managedStreams();
         System.out.println("stream modes: chunked offset summary, circular storage window, public page preview, authority and span controls green on adapter and direct routes");
+    }
+
+    static void managedStreams() throws Exception {
+        aid = new AID(new byte[] {(byte) 0xF0, 0, 0, 1, 4, 3}, (short) 0, (byte) 6);
+        ModeStoreApplet.managedAtInstall = true;
+        simulator.installApplet(aid, ModeStoreApplet.class);
+        ModeStoreApplet.managedAtInstall = false;
+        simulator.selectApplet(aid);
+        ModeStoreApplet.direct = true;
+        ModeStoreApplet.output = 0;
+        ManagedWorkspace managed = ModeStoreApplet.installed.logic.managed;
+        auth(false);
+
+        byte[] input = offsets(352);
+        recordUpload(input, "managed upload");
+        byte[] wrong = close(input);
+        wrong[2] ^= 1;
+        expect(0x6A80, WINDOW + CLOSE, 0, 0, wrong, 0, "managed refuses wrong digest");
+        if (managed.verifiedCalls != 0) throw new AssertionError("unverified request reached prepare");
+
+        recordUpload(input, "managed confirmed upload");
+        byte[] descriptor = expect(0x9000, WINDOW + CLOSE, 0, 0, close(input), 0, "managed close");
+        if (managed.verifiedCalls != 1 || !Arrays.equals(managed.verified, digest(input)))
+            throw new AssertionError("prepare did not borrow the verified digest");
+        if (ModeStoreApplet.produceCalls != 0) throw new AssertionError("prepared result was produced twice");
+        int packets = (ModeStoreApplet.windowLength + 191) / 192;
+        byte[] result = readAll(WINDOW, packets, "managed read");
+        checkResult(descriptor, result, "managed result differs from descriptor");
+        checkRecordTransfer(input, result, "managed result bytes");
+        expect(0x9000, WINDOW + CLOSE_READ, 0, 0, close(result), 0, "managed release");
+        if (managed.current() != null || !Arrays.equals(managed.bytes, new byte[managed.bytes.length]))
+            throw new AssertionError("closed result not wiped and released");
+
+        recordUpload(input, "managed bad storage upload");
+        ModeStoreApplet.control = 10;
+        expect(0x6A80, WINDOW + CLOSE, 0, 0, close(input), 0, "managed rejects persistent result");
+        ModeStoreApplet.control = 0;
+        if (managed.current() != null) throw new AssertionError("refused storage retained bytes");
+
+        byte[] page = chunk(352, 5);
+        expect(0x9000, PREVIEW, 0, 2, Arrays.copyOf(page, 192), 0, "managed public first chunk");
+        expect(0x9000, PREVIEW, 1, 2, Arrays.copyOfRange(page, 192, 352), 0, "managed public last chunk");
+        byte[] d = expect(0x9000, PREVIEW + CLOSE, 0, 0, close(page), 0, "managed public close");
+        checkResult(d, readAll(PREVIEW, 2, "managed public read"), "managed public descriptor mismatch");
+        expect(0x9000, PREVIEW + ABORT, 0, 0, EMPTY, 0, "managed public abort");
+        if (managed.current() != null || !Arrays.equals(managed.bytes, new byte[managed.bytes.length]))
+            throw new AssertionError("aborted public upload not wiped and released");
     }
 
     // ---------------------------------------------------------------- chunked
