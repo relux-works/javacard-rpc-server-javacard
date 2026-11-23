@@ -238,3 +238,22 @@ source projection hashes do not replay measurements.
   handler failure);
 - `TestStreamModesAllocationPayload` and `TestStreamModesClassicCAP` (Classic
   3.0.5u4 conversion with a fixture using every callback and page hashing).
+
+## Managed transient workspace
+
+A mixed-mode applet can bind a `PublicStreamWorkspace` at construction.
+Only public-invalidate uploads that return a stream use this provider for
+staging. It must return the same private transient array from `acquire()`
+and `current()` until the operation finishes or is abandoned. The runtime
+rejects persistent, borrowed APDU and undersized arrays before copying chunks.
+Authenticated streams and public methods with short results keep their
+existing storage. The applet owns wiping and reclamation. `finished(methodId)`
+runs once after a verified CLOSE_READ, and `abandoned()` on an aborted or
+refused active public transfer. A duplicate CLOSE_READ uses only its descriptor.
+
+For a chunked request with a streamed response, `prepareVerifiedChunkedResult`
+can consume the 32-byte request digest once the runtime has checked it.
+The array is borrowed for that call. A handler may expose its result from
+`preparedStreamResult` so the runtime hashes the transient result directly.
+The producer must serve those same bytes on READ_CHUNK. Returning null keeps
+the per-chunk hashing path. Existing handlers use the same wire protocol.

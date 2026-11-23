@@ -1,8 +1,8 @@
 # javacard-rpc-server-javacard
 
-Current mixed-mode generation includes public-only session invalidation; see
-[`STREAM-MODES.md`](STREAM-MODES.md#authority) for its authority and cleanup
-contract. It is an additive source change pending a new reviewed release.
+Mixed-mode streams can use caller-owned transient storage and reuse the runtime's
+verified request and prepared response. See the
+[stream modes contract](STREAM-MODES.md#managed-transient-workspace).
 
 The ModeStore stream-mode fixture uses independent circular-store seeks,
 page preview and page description. BatchStore fixture responses encode their
@@ -13,19 +13,19 @@ and the split between historical generation and current-source receipts.
 Java Card code-generation backend and on-card runtime for
 [javacard-rpc](https://github.com/relux-works/javacard-rpc). The root repository tag
 versions both components: the Go backend lives in codegen/ and the Java runtime
-keeps its normal root Gradle layout. The `v0.8.0` release candidate pairs Go module
-version `v0.8.0` with runtime version `0.8.0` at the same repository commit. Runtime
-coordinates are `io.jcrpc:javacard-rpc-server-javacard:0.8.0`; the group, artifact
+keeps its normal root Gradle layout. The `v0.9.0` release candidate pairs Go module
+version `v0.9.0` with runtime version `0.9.0` at the same repository commit. Runtime
+coordinates are `io.jcrpc:javacard-rpc-server-javacard:0.9.0`; the group, artifact
 name and Java package `io.jcrpc.server` are unchanged.
 
 ## Version pins
 
 Use the root module version for the backend:
 
-The following pins and tag commands apply once `v0.8.0` is published.
+The following pins and tag commands apply once `v0.9.0` is published.
 
 ```sh
-go get github.com/relux-works/javacard-rpc-server-javacard@v0.8.0
+go get github.com/relux-works/javacard-rpc-server-javacard@v0.9.0
 ```
 
 Build the runtime from the same root tag with the included Gradle wrapper:
@@ -33,16 +33,16 @@ Build the runtime from the same root tag with the included Gradle wrapper:
 ```sh
 git clone https://github.com/relux-works/javacard-rpc-server-javacard.git
 cd javacard-rpc-server-javacard
-git verify-tag v0.8.0
-git checkout --detach v0.8.0
-git rev-parse 'v0.8.0^{commit}'
+git verify-tag v0.9.0
+git checkout --detach v0.9.0
+git rev-parse 'v0.9.0^{commit}'
 ./gradlew build --no-daemon
 ```
 
 The peeled tag commit identifies both components; the runtime jar is
-`build/libs/javacard-rpc-server-javacard-0.8.0.jar`. These instructions build
+`build/libs/javacard-rpc-server-javacard-0.9.0.jar`. These instructions build
 from source; they do not require a Maven repository publication. See
-[release notes](RELEASE-NOTES-0.8.0.md) for compatibility and verification limits.
+[release notes](RELEASE-NOTES-0.9.0.md) for compatibility and verification limits.
 
 ## Requirements
 
